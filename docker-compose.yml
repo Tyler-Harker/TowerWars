@@ -1,0 +1,208 @@
+version: '3.8'
+
+services:
+  # Infrastructure
+  postgres:
+    image: postgres:16-alpine
+    container_name: towerwars-postgres
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev123
+      POSTGRES_DB: towerwars
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/docker/init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d towerwars"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - towerwars-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: towerwars-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - towerwars-network
+
+  # Backend Services
+  auth:
+    build:
+      context: .
+      dockerfile: src/TowerWars.Auth/Dockerfile.dev
+    container_name: towerwars-auth
+    ports:
+      - "7001:7001"
+      - "5001:5001"  # Debug port
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:7001
+      - ConnectionStrings__Redis=redis:6379
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=towerwars;Username=dev;Password=dev123
+      - Jwt__Secret=your-super-secret-jwt-key-change-this-in-production
+      - Jwt__Issuer=TowerWars.Auth
+      - Jwt__Audience=TowerWars
+      - Oidc__Authority=https://identity.harker.dev/tenant/harker
+      - Oidc__ClientId=tower-wars-godot
+      - Oidc__ClientSecret=${OIDC_CLIENT_SECRET:-}
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+    volumes:
+      - ./src/TowerWars.Auth:/app/TowerWars.Auth
+      - ./src/TowerWars.Shared:/app/TowerWars.Shared
+      - /app/TowerWars.Auth/bin
+      - /app/TowerWars.Auth/obj
+      - /app/TowerWars.Shared/bin
+      - /app/TowerWars.Shared/obj
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - towerwars-network
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/TowerWars.Gateway/Dockerfile.dev
+    container_name: towerwars-gateway
+    ports:
+      - "7000:7000"
+      - "5000:5000"  # Debug port
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:7000
+      - ConnectionStrings__Redis=redis:6379
+      - Auth__ServiceUrl=http://auth:7001
+      - WorldManager__ServiceUrl=http://world-manager:7002
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+    volumes:
+      - ./src/TowerWars.Gateway:/app/TowerWars.Gateway
+      - ./src/TowerWars.Shared:/app/TowerWars.Shared
+      - /app/TowerWars.Gateway/bin
+      - /app/TowerWars.Gateway/obj
+      - /app/TowerWars.Shared/bin
+      - /app/TowerWars.Shared/obj
+    depends_on:
+      - redis
+      - auth
+    networks:
+      - towerwars-network
+
+  world-manager:
+    build:
+      context: .
+      dockerfile: src/TowerWars.WorldManager/Dockerfile.dev
+    container_name: towerwars-world-manager
+    ports:
+      - "7002:7002"
+      - "7003:7003"  # gRPC port
+      - "5002:5002"  # Debug port
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:7002
+      - ConnectionStrings__Redis=redis:6379
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+    volumes:
+      - ./src/TowerWars.WorldManager:/app/TowerWars.WorldManager
+      - ./src/TowerWars.Shared:/app/TowerWars.Shared
+      - /app/TowerWars.WorldManager/bin
+      - /app/TowerWars.WorldManager/obj
+    depends_on:
+      - redis
+    networks:
+      - towerwars-network
+
+  zone-server:
+    build:
+      context: .
+      dockerfile: src/TowerWars.ZoneServer/Dockerfile.dev
+    container_name: towerwars-zone-server
+    ports:
+      - "7100:7100/udp"  # ENet UDP port
+      - "5003:5003"      # Debug port
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Redis=redis:6379
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+    volumes:
+      - ./src/TowerWars.ZoneServer:/app/TowerWars.ZoneServer
+      - ./src/TowerWars.Shared:/app/TowerWars.Shared
+      - /app/TowerWars.ZoneServer/bin
+      - /app/TowerWars.ZoneServer/obj
+    depends_on:
+      - redis
+    networks:
+      - towerwars-network
+
+  social:
+    build:
+      context: .
+      dockerfile: src/TowerWars.Social/Dockerfile.dev
+    container_name: towerwars-social
+    ports:
+      - "7004:7004"
+      - "5004:5004"  # Debug port
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:7004
+      - ConnectionStrings__Redis=redis:6379
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+    volumes:
+      - ./src/TowerWars.Social:/app/TowerWars.Social
+      - ./src/TowerWars.Shared:/app/TowerWars.Shared
+      - /app/TowerWars.Social/bin
+      - /app/TowerWars.Social/obj
+      - /app/TowerWars.Shared/bin
+      - /app/TowerWars.Shared/obj
+    depends_on:
+      - redis
+    networks:
+      - towerwars-network
+
+  persistence:
+    build:
+      context: .
+      dockerfile: src/TowerWars.Persistence/Dockerfile.dev
+    container_name: towerwars-persistence
+    ports:
+      - "5005:5005"  # Debug port
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Redis=redis:6379
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=towerwars;Username=dev;Password=dev123
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+    volumes:
+      - ./src/TowerWars.Persistence:/app/TowerWars.Persistence
+      - ./src/TowerWars.Shared:/app/TowerWars.Shared
+      - /app/TowerWars.Persistence/bin
+      - /app/TowerWars.Persistence/obj
+      - /app/TowerWars.Shared/bin
+      - /app/TowerWars.Shared/obj
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - towerwars-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  towerwars-network:
+    driver: bridge

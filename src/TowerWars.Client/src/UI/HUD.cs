@@ -1,6 +1,7 @@
 using Godot;
 using TowerWars.Client.Autoloads;
 using TowerWars.Client.Game;
+using TowerWars.Shared.Constants;
 using TowerWars.Shared.Protocol;
 
 namespace TowerWars.Client.UI;

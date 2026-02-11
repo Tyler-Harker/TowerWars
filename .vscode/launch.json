@@ -1,0 +1,120 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Docker: Attach to Auth",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "1",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "towerwars-auth"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceRoot}",
+        "quoteArgs": false
+      },
+      "sourceFileMap": {
+        "/app/TowerWars.Auth": "${workspaceFolder}/src/TowerWars.Auth",
+        "/app/TowerWars.Shared": "${workspaceFolder}/src/TowerWars.Shared"
+      }
+    },
+    {
+      "name": "Docker: Attach to Gateway",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "1",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "towerwars-gateway"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceRoot}",
+        "quoteArgs": false
+      },
+      "sourceFileMap": {
+        "/app/TowerWars.Gateway": "${workspaceFolder}/src/TowerWars.Gateway",
+        "/app/TowerWars.Shared": "${workspaceFolder}/src/TowerWars.Shared"
+      }
+    },
+    {
+      "name": "Docker: Attach to Zone Server",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "1",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "towerwars-zone-server"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceRoot}",
+        "quoteArgs": false
+      },
+      "sourceFileMap": {
+        "/app/TowerWars.ZoneServer": "${workspaceFolder}/src/TowerWars.ZoneServer",
+        "/app/TowerWars.Shared": "${workspaceFolder}/src/TowerWars.Shared"
+      }
+    },
+    {
+      "name": "Docker: Attach to World Manager",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "1",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "towerwars-world-manager"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceRoot}",
+        "quoteArgs": false
+      },
+      "sourceFileMap": {
+        "/app/TowerWars.WorldManager": "${workspaceFolder}/src/TowerWars.WorldManager",
+        "/app/TowerWars.Shared": "${workspaceFolder}/src/TowerWars.Shared"
+      }
+    },
+    {
+      "name": "Docker: Attach to Social",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "1",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "towerwars-social"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceRoot}",
+        "quoteArgs": false
+      },
+      "sourceFileMap": {
+        "/app/TowerWars.Social": "${workspaceFolder}/src/TowerWars.Social",
+        "/app/TowerWars.Shared": "${workspaceFolder}/src/TowerWars.Shared"
+      }
+    },
+    {
+      "name": "Docker: Attach to Persistence",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "1",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "towerwars-persistence"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceRoot}",
+        "quoteArgs": false
+      },
+      "sourceFileMap": {
+        "/app/TowerWars.Persistence": "${workspaceFolder}/src/TowerWars.Persistence",
+        "/app/TowerWars.Shared": "${workspaceFolder}/src/TowerWars.Shared"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug All Services",
+      "configurations": [
+        "Docker: Attach to Auth",
+        "Docker: Attach to Gateway",
+        "Docker: Attach to Zone Server",
+        "Docker: Attach to World Manager",
+        "Docker: Attach to Social",
+        "Docker: Attach to Persistence"
+      ]
+    }
+  ]
+}

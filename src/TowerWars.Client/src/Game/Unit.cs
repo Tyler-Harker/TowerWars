@@ -1,4 +1,5 @@
 using Godot;
+using TowerWars.Shared.Constants;
 using TowerWars.Shared.Protocol;
 
 namespace TowerWars.Client.Game;
@@ -8,7 +9,7 @@ public partial class Unit : Node2D
     [Export]
     public uint EntityId { get; set; }
 
-    [Export]
+    // UnitType from Shared library - not directly exportable to Godot editor
     public UnitType UnitType { get; set; }
 
     [Export]

@@ -1,5 +1,6 @@
 using ENet;
 using Godot;
+using TowerWars.Shared.Constants;
 using TowerWars.Shared.Protocol;
 
 namespace TowerWars.Client.Networking;

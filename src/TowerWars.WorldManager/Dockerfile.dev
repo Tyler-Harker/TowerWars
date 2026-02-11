@@ -1,0 +1,27 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+# Install vsdbg for debugging
+RUN apt-get update && apt-get install -y curl unzip \
+    && curl -sSL https://aka.ms/getvsdbgsh | bash /dev/stdin -v latest -l /vsdbg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy project files for restore
+COPY ["src/TowerWars.Shared/TowerWars.Shared.csproj", "TowerWars.Shared/"]
+COPY ["src/TowerWars.WorldManager/TowerWars.WorldManager.csproj", "TowerWars.WorldManager/"]
+
+# Restore dependencies
+RUN dotnet restore "TowerWars.WorldManager/TowerWars.WorldManager.csproj"
+
+# Copy source code (volumes will override this)
+COPY ["src/TowerWars.Shared/", "TowerWars.Shared/"]
+COPY ["src/TowerWars.WorldManager/", "TowerWars.WorldManager/"]
+
+WORKDIR /app/TowerWars.WorldManager
+
+# Expose app and debug ports
+EXPOSE 7002 7003 5002
+
+# Run with hot reload
+ENTRYPOINT ["dotnet", "watch", "run", "--no-restore", "--urls", "http://0.0.0.0:7002"]

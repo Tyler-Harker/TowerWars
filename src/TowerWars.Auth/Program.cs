@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using StackExchange.Redis;
@@ -47,7 +48,11 @@ builder.Services.AddScoped<IEquipmentService, EquipmentService>();
 builder.Services.AddHostedService<TowerXpConsumer>();
 
 // Authentication
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -60,6 +65,25 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = jwtSettings.Audience,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromSeconds(30)
+        };
+    })
+    .AddOpenIdConnect("oidc", options =>
+    {
+        options.Authority = builder.Configuration["Oidc:Authority"] ?? "https://identity.harker.dev/tenant/harker";
+        options.ClientId = builder.Configuration["Oidc:ClientId"] ?? "tower-wars-godot";
+        options.ClientSecret = builder.Configuration["Oidc:ClientSecret"];
+        options.ResponseType = "code";
+        options.SaveTokens = true;
+        options.GetClaimsFromUserInfoEndpoint = true;
+        options.Scope.Add("openid");
+        options.Scope.Add("profile");
+        options.Scope.Add("email");
+
+        // Map OIDC claims to standard claims
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            NameClaimType = "name",
+            RoleClaimType = "role"
         };
     });
 

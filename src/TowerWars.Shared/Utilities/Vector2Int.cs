@@ -31,7 +31,9 @@ public readonly struct Vector2Int : IEquatable<Vector2Int>
     public static bool operator ==(Vector2Int a, Vector2Int b) => a.X == b.X && a.Y == b.Y;
     public static bool operator !=(Vector2Int a, Vector2Int b) => !(a == b);
 
+    [IgnoreMember]
     public float Magnitude => MathF.Sqrt(X * X + Y * Y);
+
     public int ManhattanDistance(Vector2Int other) => Math.Abs(X - other.X) + Math.Abs(Y - other.Y);
 
     public bool Equals(Vector2Int other) => X == other.X && Y == other.Y;
