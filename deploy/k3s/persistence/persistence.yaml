@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: persistence
+  namespace: towerwars
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: persistence
+  template:
+    metadata:
+      labels:
+        app: persistence
+    spec:
+      containers:
+        - name: persistence
+          image: towerwars/persistence:latest
+          env:
+            - name: ConnectionStrings__Redis
+              value: "redis:6379"
+            - name: ConnectionStrings__Postgres
+              value: "Host=postgres;Port=5432;Database=towerwars;Username=$(POSTGRES_USER);Password=$(POSTGRES_PASSWORD)"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: towerwars-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: towerwars-secrets
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

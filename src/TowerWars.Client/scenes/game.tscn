@@ -1,0 +1,64 @@
+[gd_scene load_steps=3 format=3 uid="uid://game"]
+
+[ext_resource type="Script" path="res://src/Game/GameWorld.cs" id="1_world"]
+[ext_resource type="Script" path="res://src/UI/HUD.cs" id="2_hud"]
+
+[node name="Game" type="Node2D"]
+
+[node name="GameWorld" type="Node2D" parent="."]
+script = ExtResource("1_world")
+
+[node name="Grid" type="Node2D" parent="GameWorld"]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("2_hud")
+
+[node name="TopPanel" type="HBoxContainer" parent="HUD"]
+offset_right = 1920.0
+offset_bottom = 50.0
+
+[node name="GoldLabel" type="Label" parent="HUD/TopPanel"]
+layout_mode = 2
+text = "Gold: 500"
+
+[node name="LivesLabel" type="Label" parent="HUD/TopPanel"]
+layout_mode = 2
+text = "Lives: 20"
+
+[node name="ScoreLabel" type="Label" parent="HUD/TopPanel"]
+layout_mode = 2
+text = "Score: 0"
+
+[node name="WaveLabel" type="Label" parent="HUD/TopPanel"]
+layout_mode = 2
+text = "Wave: 0"
+
+[node name="RttLabel" type="Label" parent="HUD/TopPanel"]
+layout_mode = 2
+text = "RTT: 0ms"
+
+[node name="SidePanel" type="VBoxContainer" parent="HUD"]
+offset_left = 1720.0
+offset_top = 60.0
+offset_right = 1910.0
+offset_bottom = 500.0
+
+[node name="TowerList" type="ItemList" parent="HUD/SidePanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BottomPanel" type="HBoxContainer" parent="HUD"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -100.0
+offset_top = -50.0
+offset_right = 100.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="ReadyButton" type="Button" parent="HUD/BottomPanel"]
+layout_mode = 2
+text = "Ready"

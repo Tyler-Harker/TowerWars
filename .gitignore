@@ -1,0 +1,32 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+
+# .NET
+*.user
+*.userosscache
+*.suo
+*.cache
+*.sln.docstates
+project.lock.json
+.vs/
+
+# NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+
+# Rider
+.idea/
+
+# Godot
+.godot/
+*.import
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

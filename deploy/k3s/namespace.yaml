@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: towerwars
+  labels:
+    app.kubernetes.io/name: towerwars
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: towerwars-config
+  namespace: towerwars
+data:
+  JWT_SECRET: "CHANGE_THIS_TO_A_SECURE_SECRET_KEY_AT_LEAST_32_CHARACTERS"
+  JWT_ISSUER: "TowerWars.Auth"
+  JWT_AUDIENCE: "TowerWars"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "towerwars"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: towerwars-secrets
+  namespace: towerwars
+type: Opaque
+stringData:
+  POSTGRES_USER: "towerwars"
+  POSTGRES_PASSWORD: "changeme"
