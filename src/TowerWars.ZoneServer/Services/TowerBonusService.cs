@@ -134,3 +134,23 @@ public class TowerBonusService : ITowerBonusService
     private sealed record CachedBonus(TowerBonusSummaryDto Bonuses, DateTime ExpiresAt);
     private sealed record CachedWeapon(WeaponAttackStyleDto? Weapon, DateTime ExpiresAt);
 }
+
+/// <summary>
+/// Local tower bonus service for development that returns empty bonuses without making HTTP calls.
+/// </summary>
+public class LocalTowerBonusService : ITowerBonusService
+{
+    public Task<TowerBonusSummaryDto> GetBonusesAsync(Guid userId, TowerType towerType)
+    {
+        return Task.FromResult(new TowerBonusSummaryDto(
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new Dictionary<TowerBonusType, decimal>()
+        ));
+    }
+
+    public Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid userId, TowerType towerType)
+    {
+        return Task.FromResult<WeaponAttackStyleDto?>(null);
+    }
+
+    public void InvalidateCache(Guid userId) { }
+}

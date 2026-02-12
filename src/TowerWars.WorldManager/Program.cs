@@ -5,6 +5,8 @@ using TowerWars.WorldManager.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 // gRPC
 builder.Services.AddGrpc();
 
@@ -27,8 +29,7 @@ var app = builder.Build();
 // gRPC endpoint
 app.MapGrpcService<WorldGrpcService>();
 
-// Health check
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "world-manager" }));
+app.MapDefaultEndpoints();
 
 // REST API endpoints (for simpler integrations)
 app.MapGet("/api/zones", async (IZoneOrchestrator orchestrator) =>

@@ -1,0 +1,27 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.1.0">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>50f4c9ab-8588-43e6-a516-9018895ebe1d</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Aspire Hosting Packages -->
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.1.0" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="13.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Service References -->
+    <ProjectReference Include="..\TowerWars.Auth\TowerWars.Auth.csproj" />
+    <ProjectReference Include="..\TowerWars.Gateway\TowerWars.Gateway.csproj" />
+    <ProjectReference Include="..\TowerWars.WorldManager\TowerWars.WorldManager.csproj" />
+    <ProjectReference Include="..\TowerWars.ZoneServer\TowerWars.ZoneServer.csproj" />
+    <ProjectReference Include="..\TowerWars.Social\TowerWars.Social.csproj" />
+    <ProjectReference Include="..\TowerWars.Persistence\TowerWars.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

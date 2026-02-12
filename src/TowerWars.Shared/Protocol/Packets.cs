@@ -1,5 +1,6 @@
 using MessagePack;
 using TowerWars.Shared.Constants;
+using TowerWars.Shared.DTOs;
 
 namespace TowerWars.Shared.Protocol;
 
@@ -363,6 +364,19 @@ public sealed class ReadyStatePacket : IPacket
 }
 
 [MessagePackObject]
+public sealed class GamePausePacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.GamePause;
+
+    [Key(0)]
+    public required bool IsPaused { get; init; }
+
+    [Key(1)]
+    public string? Reason { get; init; }
+}
+
+[MessagePackObject]
 public sealed class ChatMessagePacket : IPacket
 {
     [IgnoreMember]
@@ -436,5 +450,73 @@ public enum ErrorCode : ushort
     MatchNotStarted = 7,
     MatchAlreadyStarted = 8,
     PlayerNotFound = 9,
-    RateLimited = 10
+    RateLimited = 10,
+    ItemDropNotFound = 11,
+    ItemAlreadyCollected = 12
+}
+
+[MessagePackObject]
+public sealed class ItemDropPacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.ItemDrop;
+
+    [Key(0)]
+    public required uint DropId { get; init; }
+
+    [Key(1)]
+    public required float X { get; init; }
+
+    [Key(2)]
+    public required float Y { get; init; }
+
+    [Key(3)]
+    public required ItemType ItemType { get; init; }
+
+    [Key(4)]
+    public required ItemRarity Rarity { get; init; }
+
+    [Key(5)]
+    public required int ItemLevel { get; init; }
+
+    [Key(6)]
+    public required string Name { get; init; }
+
+    [Key(7)]
+    public required uint OwnerId { get; init; }
+}
+
+[MessagePackObject]
+public sealed class ItemCollectPacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.ItemCollect;
+
+    [Key(0)]
+    public required uint RequestId { get; init; }
+
+    [Key(1)]
+    public required uint DropId { get; init; }
+}
+
+[MessagePackObject]
+public sealed class ItemCollectAckPacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.ItemCollectAck;
+
+    [Key(0)]
+    public required uint RequestId { get; init; }
+
+    [Key(1)]
+    public required bool Success { get; init; }
+
+    [Key(2)]
+    public required uint DropId { get; init; }
+
+    [Key(3)]
+    public Guid? ItemId { get; init; }
+
+    [Key(4)]
+    public string? ErrorMessage { get; init; }
 }

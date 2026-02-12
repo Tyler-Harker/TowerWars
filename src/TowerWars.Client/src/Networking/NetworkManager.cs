@@ -145,6 +145,15 @@ public partial class NetworkManager : Node
         });
     }
 
+    public void SendItemCollect(uint dropId)
+    {
+        SendPacket(new ItemCollectPacket
+        {
+            RequestId = _lastInputSequence++,
+            DropId = dropId
+        });
+    }
+
     private void Poll()
     {
         while (_host.Service(0, out var netEvent) > 0)
@@ -174,7 +183,15 @@ public partial class NetworkManager : Node
     private void HandleConnect()
     {
         GD.Print("Connected to server, sending authentication...");
-        SendConnect("test-token");
+        // Send connect packet directly - bypass _connected check since we're authenticating
+        var data = PacketSerializer.Serialize(new ConnectPacket
+        {
+            ConnectionToken = "test-token",
+            ProtocolVersion = PacketSerializer.ProtocolVersion
+        });
+        var enetPacket = default(Packet);
+        enetPacket.Create(data, PacketFlags.Reliable);
+        _peer.Send(0, ref enetPacket);
     }
 
     private void HandleDisconnect(string reason)

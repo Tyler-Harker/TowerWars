@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://serversologame001"]
+
+[ext_resource type="Script" path="res://src/Game/ServerSoloGame.cs" id="1_server_solo"]
+
+[node name="ServerSoloGame" type="Node2D"]
+script = ExtResource("1_server_solo")

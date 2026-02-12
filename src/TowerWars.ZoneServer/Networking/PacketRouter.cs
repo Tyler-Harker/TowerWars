@@ -60,6 +60,10 @@ public class PacketRouter
                 HandleChatMessage(peerId, PacketSerializer.Deserialize<ChatMessagePacket>(payload));
                 break;
 
+            case PacketType.ItemCollect:
+                HandleItemCollect(peerId, PacketSerializer.Deserialize<ItemCollectPacket>(payload));
+                break;
+
             default:
                 _logger.LogWarning("Unhandled packet type {Type} from peer {PeerId}", type, peerId);
                 break;
@@ -116,5 +120,10 @@ public class PacketRouter
     private void HandleChatMessage(uint peerId, ChatMessagePacket packet)
     {
         _playerManager.BroadcastChat(peerId, packet);
+    }
+
+    private void HandleItemCollect(uint peerId, ItemCollectPacket packet)
+    {
+        _gameSession.ProcessItemCollect(peerId, packet);
     }
 }

@@ -67,7 +67,7 @@ public class GameSessionTests
     {
         return new GameSession(
             _loggerMock.Object,
-            _serverMock.Object,
+            new Lazy<ENetServer>(() => _serverMock.Object),
             _playerManagerMock.Object,
             _eventPublisherMock.Object,
             _towerBonusServiceMock.Object

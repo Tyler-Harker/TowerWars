@@ -11,26 +11,32 @@ namespace TowerWars.ZoneServer;
 public sealed class GameLoop : BackgroundService
 {
     private readonly ILogger<GameLoop> _logger;
-    private readonly ENetServer _server;
+    private readonly Lazy<ENetServer> _serverLazy;
+    private ENetServer _server => _serverLazy.Value;
     private readonly GameSession _gameSession;
+    private readonly PlayerManager _playerManager;
     private readonly ushort _port;
 
     private const double TickInterval = 1.0 / GameConstants.DefaultTickRate;
 
     public GameLoop(
         ILogger<GameLoop> logger,
-        ENetServer server,
+        Lazy<ENetServer> server,
         GameSession gameSession,
+        PlayerManager playerManager,
         IConfiguration configuration)
     {
         _logger = logger;
-        _server = server;
+        _serverLazy = server;
         _gameSession = gameSession;
+        _playerManager = playerManager;
         _port = ushort.Parse(configuration["Server:Port"] ?? "7100");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Wire up events now that all dependencies are resolved
+        _playerManager.EnsureEventsWired();
         _server.Start(_port);
         _logger.LogInformation("Game loop started at {TickRate} ticks/sec", GameConstants.DefaultTickRate);
 

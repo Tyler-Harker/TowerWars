@@ -30,17 +30,9 @@ layout_mode = 2
 text = "Tower Wars"
 horizontal_alignment = 1
 
-[node name="AddressInput" type="LineEdit" parent="VBoxContainer"]
+[node name="LoginButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
-placeholder_text = "Server Address"
-
-[node name="PortInput" type="LineEdit" parent="VBoxContainer"]
-layout_mode = 2
-placeholder_text = "Port"
-
-[node name="ConnectButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-text = "Connect"
+text = "Login"
 
 [node name="QuitButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2

@@ -1,0 +1,106 @@
+[gd_scene load_steps=2 format=3 uid="uid://dashboard001"]
+
+[ext_resource type="Script" path="res://src/UI/Dashboard.cs" id="1_dashboard"]
+
+[node name="Dashboard" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_dashboard")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 20
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Header" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="WelcomeLabel" type="Label" parent="MarginContainer/VBoxContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Welcome, Commander!"
+theme_override_font_sizes/font_size = 28
+
+[node name="GoldLabel" type="Label" parent="MarginContainer/VBoxContainer/Header"]
+layout_mode = 2
+text = "Gold: 0"
+theme_override_font_sizes/font_size = 20
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/Header"]
+custom_minimum_size = Vector2(20, 0)
+layout_mode = 2
+
+[node name="LogoutButton" type="Button" parent="MarginContainer/VBoxContainer/Header"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Logout"
+
+[node name="ContentArea" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 20
+
+[node name="TowersPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/TowersPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TowersTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentArea/TowersPanel/VBoxContainer"]
+layout_mode = 2
+text = "Your Towers"
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer/ContentArea/TowersPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer/ContentArea/TowersPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TowersList" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/TowersPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="ActionsPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/ActionsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="ActionsTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentArea/ActionsPanel/VBoxContainer"]
+layout_mode = 2
+text = "Actions"
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer/ContentArea/ActionsPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="StartGameButton" type="Button" parent="MarginContainer/VBoxContainer/ContentArea/ActionsPanel/VBoxContainer"]
+custom_minimum_size = Vector2(0, 60)
+layout_mode = 2
+text = "Start Game"
+theme_override_font_sizes/font_size = 20

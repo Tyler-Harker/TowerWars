@@ -9,11 +9,13 @@ namespace TowerWars.ZoneServer.Game;
 public class PlayerManager
 {
     private readonly ILogger<PlayerManager> _logger;
-    private readonly ENetServer _server;
+    private readonly Lazy<ENetServer> _serverLazy;
+    private ENetServer _server => _serverLazy.Value;
     private readonly ITokenValidationService _tokenService;
     private readonly IEventPublisher _eventPublisher;
     private readonly Dictionary<uint, ServerPlayer> _players = new();
     private readonly object _lock = new();
+    private bool _eventsWired;
 
     public event Action<ServerPlayer>? OnPlayerJoined;
     public event Action<ServerPlayer>? OnPlayerLeft;
@@ -21,15 +23,20 @@ public class PlayerManager
 
     public PlayerManager(
         ILogger<PlayerManager> logger,
-        ENetServer server,
+        Lazy<ENetServer> server,
         ITokenValidationService tokenService,
         IEventPublisher eventPublisher)
     {
         _logger = logger;
-        _server = server;
+        _serverLazy = server;
         _tokenService = tokenService;
         _eventPublisher = eventPublisher;
+    }
 
+    public void EnsureEventsWired()
+    {
+        if (_eventsWired) return;
+        _eventsWired = true;
         _server.OnPeerConnected += HandlePeerConnected;
         _server.OnPeerDisconnected += HandlePeerDisconnected;
     }

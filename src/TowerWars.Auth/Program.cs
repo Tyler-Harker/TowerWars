@@ -11,6 +11,8 @@ using TowerWars.Shared.DTOs;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 // Configuration
 var jwtSettings = new JwtSettings
 {
@@ -91,12 +93,21 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Ensure database schema is created
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    logger.LogInformation("Ensuring Auth database schema exists...");
+    await db.Database.EnsureCreatedAsync();
+    logger.LogInformation("Auth database schema ready");
+}
+
 // Middleware
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Health check
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "auth" }));
+app.MapDefaultEndpoints();
 
 // Auth endpoints
 app.MapPost("/api/auth/register", async (RegisterRequest request, IAuthService authService, HttpContext ctx) =>
@@ -187,6 +198,9 @@ app.MapGet("/api/towers", async (HttpContext ctx, ITowerProgressionService progr
     var userIdClaim = ctx.User.FindFirst("sub")?.Value;
     if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
         return Results.Unauthorized();
+
+    // Ensure new players have at least the basic tower
+    await progressionService.EnsureBasicTowerUnlockedAsync(userId);
 
     var result = await progressionService.GetPlayerTowersAsync(userId);
     return Results.Ok(result);

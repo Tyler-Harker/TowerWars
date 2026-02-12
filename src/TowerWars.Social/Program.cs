@@ -10,6 +10,8 @@ using TowerWars.Social.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 // Database
 builder.Services.AddDbContext<SocialDbContext>(options =>
 {
@@ -17,13 +19,15 @@ builder.Services.AddDbContext<SocialDbContext>(options =>
 });
 
 // Redis
-var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(redisConnectionString));
+{
+    var connectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(connectionString);
+});
 
-// SignalR with Redis backplane
+// SignalR with Redis backplane (uses the connection string from Aspire)
 builder.Services.AddSignalR()
-    .AddStackExchangeRedis(redisConnectionString, options =>
+    .AddStackExchangeRedis(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379", options =>
     {
         options.Configuration.ChannelPrefix = RedisChannel.Literal("social:");
     });
@@ -70,14 +74,23 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Ensure database schema is created
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<SocialDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    logger.LogInformation("Ensuring Social database schema exists...");
+    await db.Database.EnsureCreatedAsync();
+    logger.LogInformation("Social database schema ready");
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 // SignalR hub
 app.MapHub<SocialHub>("/hubs/social");
 
-// Health check
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "social" }));
+app.MapDefaultEndpoints();
 
 // REST endpoints
 app.MapGet("/api/friends", async (HttpContext ctx, IFriendService friends) =>

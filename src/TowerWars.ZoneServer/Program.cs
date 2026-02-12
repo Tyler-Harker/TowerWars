@@ -10,12 +10,15 @@ using TowerWars.ZoneServer.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.AddServiceDefaultsNonWeb();
+
 builder.Services.AddLogging(logging =>
 {
     logging.AddConsole();
     logging.SetMinimumLevel(LogLevel.Debug);
 });
 
+// Redis
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
 var useRedis = builder.Configuration.GetValue<bool>("UseRedis", true);
 
@@ -54,18 +57,28 @@ else
 }
 
 // Tower bonus service for fetching player bonuses
-builder.Services.AddSingleton<ITowerBonusService>(sp =>
+var useLocalBonuses = builder.Configuration.GetValue<bool>("UseLocalBonuses", true);
+if (useLocalBonuses)
 {
-    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
-    var config = sp.GetRequiredService<IConfiguration>();
-    var logger = sp.GetRequiredService<ILogger<TowerBonusService>>();
-    return new TowerBonusService(httpClient, config, logger);
-});
+    builder.Services.AddSingleton<ITowerBonusService, LocalTowerBonusService>();
+}
+else
+{
+    builder.Services.AddSingleton<ITowerBonusService>(sp =>
+    {
+        var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
+        var config = sp.GetRequiredService<IConfiguration>();
+        var logger = sp.GetRequiredService<ILogger<TowerBonusService>>();
+        return new TowerBonusService(httpClient, config, logger);
+    });
+}
 
 builder.Services.AddSingleton<ENetServer>();
 builder.Services.AddSingleton<PacketRouter>();
 builder.Services.AddSingleton<PlayerManager>();
 builder.Services.AddSingleton<GameSession>();
+// Register Lazy<ENetServer> to break circular dependency
+builder.Services.AddSingleton(sp => new Lazy<ENetServer>(() => sp.GetRequiredService<ENetServer>()));
 builder.Services.AddHostedService<GameLoop>();
 
 var host = builder.Build();

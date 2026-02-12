@@ -30,6 +30,9 @@ public enum PacketType : byte
     TowerSell = 0x42,
     AbilityUse = 0x43,
     UnitSpawn = 0x44,
+    ItemDrop = 0x45,
+    ItemCollect = 0x46,
+    ItemCollectAck = 0x47,
 
     // Match Control
     MatchStart = 0x50,
@@ -37,6 +40,7 @@ public enum PacketType : byte
     WaveStart = 0x52,
     WaveEnd = 0x53,
     ReadyState = 0x54,
+    GamePause = 0x55,
 
     // Chat
     ChatMessage = 0x60,

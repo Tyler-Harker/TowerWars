@@ -1,0 +1,81 @@
+[gd_scene load_steps=2 format=3 uid="uid://modeselect001"]
+
+[ext_resource type="Script" path="res://src/UI/ModeSelection.cs" id="1_mode"]
+
+[node name="ModeSelection" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_mode")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 40
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 30
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Select Game Mode"
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+
+[node name="ModesContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+alignment = 1
+theme_override_constants/separation = 30
+
+[node name="SoloButton" type="Button" parent="MarginContainer/VBoxContainer/ModesContainer"]
+custom_minimum_size = Vector2(200, 250)
+layout_mode = 2
+text = "Solo
+
+Battle through tiers
+alone and prove
+your skill!"
+theme_override_font_sizes/font_size = 18
+
+[node name="CoopButton" type="Button" parent="MarginContainer/VBoxContainer/ModesContainer"]
+custom_minimum_size = Vector2(200, 250)
+layout_mode = 2
+text = "Co-op
+
+Team up with friends
+to tackle harder
+challenges!
+
+(Coming Soon)"
+theme_override_font_sizes/font_size = 18
+
+[node name="PvPButton" type="Button" parent="MarginContainer/VBoxContainer/ModesContainer"]
+custom_minimum_size = Vector2(200, 250)
+layout_mode = 2
+text = "PvP
+
+Compete against
+other players in
+real-time battles!
+
+(Coming Soon)"
+theme_override_font_sizes/font_size = 18
+
+[node name="BackButton" type="Button" parent="MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(150, 50)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Back"
+theme_override_font_sizes/font_size = 18

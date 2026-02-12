@@ -18,7 +18,7 @@ public partial class PacketHandler : Node
     public delegate void WaveEndedEventHandler(int waveNumber, bool success, int bonusGold);
 
     [Signal]
-    public delegate void EntitySpawnedEventHandler(uint entityId, int entityType, float x, float y);
+    public delegate void EntitySpawnedEventHandler(uint entityId, int entityType, float x, float y, byte[] extraData);
 
     [Signal]
     public delegate void EntityDestroyedEventHandler(uint entityId);
@@ -34,6 +34,15 @@ public partial class PacketHandler : Node
 
     [Signal]
     public delegate void ErrorReceivedEventHandler(int code, string message);
+
+    [Signal]
+    public delegate void ItemDroppedEventHandler(uint dropId, float x, float y, int itemType, int rarity, int itemLevel, string name, uint ownerId);
+
+    [Signal]
+    public delegate void ItemCollectedEventHandler(uint dropId, bool success, string? itemId, string? error);
+
+    [Signal]
+    public delegate void GamePausedEventHandler(bool isPaused, string? reason);
 
     private NetworkManager? _network;
 
@@ -89,6 +98,18 @@ public partial class PacketHandler : Node
             case PacketType.Error:
                 HandleError(PacketSerializer.Deserialize<ErrorPacket>(payloadMemory));
                 break;
+
+            case PacketType.ItemDrop:
+                HandleItemDrop(PacketSerializer.Deserialize<ItemDropPacket>(payloadMemory));
+                break;
+
+            case PacketType.ItemCollectAck:
+                HandleItemCollectAck(PacketSerializer.Deserialize<ItemCollectAckPacket>(payloadMemory));
+                break;
+
+            case PacketType.GamePause:
+                HandleGamePause(PacketSerializer.Deserialize<GamePausePacket>(payloadMemory));
+                break;
         }
     }
 
@@ -122,7 +143,8 @@ public partial class PacketHandler : Node
             packet.Entity.EntityId,
             (int)packet.Entity.Type,
             packet.Entity.X,
-            packet.Entity.Y);
+            packet.Entity.Y,
+            packet.Entity.ExtraData ?? System.Array.Empty<byte>());
     }
 
     private void HandleEntityDestroy(EntityDestroyPacket packet)
@@ -166,5 +188,35 @@ public partial class PacketHandler : Node
     {
         GD.PrintErr($"Server error: [{packet.Code}] {packet.Message}");
         EmitSignal(SignalName.ErrorReceived, (int)packet.Code, packet.Message);
+    }
+
+    private void HandleItemDrop(ItemDropPacket packet)
+    {
+        GD.Print($"Item dropped: {packet.Name} ({packet.Rarity}) at ({packet.X}, {packet.Y})");
+        EmitSignal(SignalName.ItemDropped,
+            packet.DropId,
+            packet.X,
+            packet.Y,
+            (int)packet.ItemType,
+            (int)packet.Rarity,
+            packet.ItemLevel,
+            packet.Name,
+            packet.OwnerId);
+    }
+
+    private void HandleItemCollectAck(ItemCollectAckPacket packet)
+    {
+        GD.Print($"Item collect ACK: dropId={packet.DropId}, success={packet.Success}");
+        EmitSignal(SignalName.ItemCollected,
+            packet.DropId,
+            packet.Success,
+            packet.ItemId?.ToString() ?? string.Empty,
+            packet.ErrorMessage ?? string.Empty);
+    }
+
+    private void HandleGamePause(GamePausePacket packet)
+    {
+        GD.Print($"Game {(packet.IsPaused ? "paused" : "resumed")}: {packet.Reason ?? "no reason"}");
+        EmitSignal(SignalName.GamePaused, packet.IsPaused, packet.Reason ?? string.Empty);
     }
 }

@@ -10,7 +10,8 @@ namespace TowerWars.ZoneServer.Game;
 public sealed class GameSession
 {
     private readonly ILogger<GameSession> _logger;
-    private readonly ENetServer _server;
+    private readonly Lazy<ENetServer> _serverLazy;
+    private ENetServer _server => _serverLazy.Value;
     private readonly PlayerManager _playerManager;
     private readonly IEventPublisher _eventPublisher;
     private readonly ITowerBonusService _towerBonusService;
@@ -18,10 +19,13 @@ public sealed class GameSession
 
     private readonly Dictionary<uint, Tower> _towers = new();
     private readonly Dictionary<uint, Unit> _units = new();
+    private readonly Dictionary<uint, ServerItemDrop> _itemDrops = new();
     private readonly object _entitiesLock = new();
 
     // Track XP per tower type per player
     private readonly Dictionary<(Guid PlayerId, TowerType TowerType), int> _towerXpAccumulated = new();
+    // Track purchase count per tower type per player for cost scaling
+    private readonly Dictionary<(Guid PlayerId, TowerType TowerType), int> _towerPurchaseCounts = new();
     // Track kills this wave for perfect wave bonus
     private int _unitsKilledThisWave;
     private int _unitsLeakedThisWave;
@@ -36,25 +40,77 @@ public sealed class GameSession
     public GameState State => _state;
     public int CurrentWave => _currentWave;
 
+    private bool _isPaused;
+    private string? _pauseReason;
+    private GameMode _gameMode = GameMode.Solo;
+
+    // Auto-start timing for solo mode
+    private float _autoStartDelay = -1f;
+    private float _waveStartDelay = -1f;
+
+    public bool IsPaused => _isPaused;
+    public string? PauseReason => _pauseReason;
+
     public GameSession(
         ILogger<GameSession> logger,
-        ENetServer server,
+        Lazy<ENetServer> server,
         PlayerManager playerManager,
         IEventPublisher eventPublisher,
         ITowerBonusService towerBonusService)
     {
         _logger = logger;
-        _server = server;
+        _serverLazy = server;
         _playerManager = playerManager;
         _eventPublisher = eventPublisher;
         _towerBonusService = towerBonusService;
 
         _playerManager.OnAllPlayersReady += HandleAllPlayersReady;
+        _playerManager.OnPlayerJoined += HandlePlayerJoined;
+    }
+
+    private void HandlePlayerJoined(ServerPlayer player)
+    {
+        _logger.LogInformation("Player {PlayerId} joined, current state: {State}", player.PlayerId, _state);
+
+        // For solo mode, auto-start when a player joins
+        // Use delay timers that the Update loop will process (thread-safe)
+        if (_state == GameState.WaitingForPlayers && _gameMode == GameMode.Solo)
+        {
+            _autoStartDelay = 0.5f; // Start match after 0.5 seconds
+        }
     }
 
     public void Update(float deltaTime)
     {
         _currentTick++;
+
+        // Skip game logic updates when paused
+        if (_isPaused)
+            return;
+
+        // Handle auto-start delay for solo mode
+        if (_autoStartDelay > 0)
+        {
+            _autoStartDelay -= deltaTime;
+            if (_autoStartDelay <= 0)
+            {
+                _autoStartDelay = -1f;
+                var map = GenerateDefaultMap();
+                StartMatch(GameMode.Solo, map);
+                _waveStartDelay = 3f; // Start first wave after 3 seconds
+            }
+        }
+
+        // Handle wave start delay
+        if (_waveStartDelay > 0)
+        {
+            _waveStartDelay -= deltaTime;
+            if (_waveStartDelay <= 0)
+            {
+                _waveStartDelay = -1f;
+                StartWave();
+            }
+        }
 
         switch (_state)
         {
@@ -77,10 +133,44 @@ public sealed class GameSession
 
     public void Tick()
     {
+        // Skip tick updates when paused
+        if (_isPaused)
+            return;
+
         if (_state == GameState.WaveActive && _currentTick % 3 == 0)
         {
             BroadcastEntityUpdates();
         }
+    }
+
+    /// <summary>
+    /// Pause or resume the game. Used for connection issues or manual pause.
+    /// </summary>
+    public void SetPaused(bool paused, string? reason = null)
+    {
+        if (_isPaused == paused)
+            return;
+
+        _isPaused = paused;
+        _pauseReason = reason;
+
+        _server.Broadcast(new GamePausePacket
+        {
+            IsPaused = paused,
+            Reason = reason
+        });
+
+        _logger.LogInformation("Game {State}: {Reason}",
+            paused ? "paused" : "resumed",
+            reason ?? "no reason specified");
+
+        _eventPublisher.PublishAsync(new
+        {
+            EventType = paused ? "game.paused" : "game.resumed",
+            MatchId = _matchId,
+            Reason = reason,
+            Timestamp = DateTime.UtcNow
+        });
     }
 
     public void ProcessInput(uint peerId, PlayerInputPacket packet)
@@ -103,7 +193,12 @@ public sealed class GameSession
 
         var baseStats = TowerDefinitions.GetStats(packet.TowerType);
 
-        if (player.Gold < baseStats.Cost)
+        // Calculate dynamic cost based on purchase count for this tower type
+        var purchaseKey = (player.UserId, packet.TowerType);
+        var purchaseCount = _towerPurchaseCounts.GetValueOrDefault(purchaseKey, 0);
+        var dynamicCost = TowerCostCalculator.CalculateCost(packet.TowerType, purchaseCount);
+
+        if (player.Gold < dynamicCost)
         {
             SendError(peerId, ErrorCode.InsufficientGold, "Not enough gold", packet.RequestId);
             return;
@@ -115,7 +210,10 @@ public sealed class GameSession
             return;
         }
 
-        _playerManager.ModifyGold(player.PlayerId, -baseStats.Cost);
+        _playerManager.ModifyGold(player.PlayerId, -dynamicCost);
+
+        // Increment purchase count for this tower type
+        _towerPurchaseCounts[purchaseKey] = purchaseCount + 1;
 
         // Fetch player bonuses for this tower type
         var bonuses = await _towerBonusService.GetBonusesAsync(player.UserId, packet.TowerType);
@@ -159,7 +257,7 @@ public sealed class GameSession
             TowerType = (byte)packet.TowerType,
             packet.GridX,
             packet.GridY,
-            GoldSpent = baseStats.Cost,
+            GoldSpent = dynamicCost,
             Timestamp = DateTime.UtcNow
         });
 
@@ -178,7 +276,7 @@ public sealed class GameSession
                 Range: (float)(weapon.Range * (1 + bonuses.RangePercent / 100)),
                 AttackSpeed: (float)(weapon.AttackSpeed * (1 + bonuses.AttackSpeedPercent / 100)),
                 SellValue: baseStats.SellValue,
-                DamageType: weapon.Subtype == WeaponSubtype.Wand ? DamageType.Magic : baseStats.DamageType,
+                DamageType: baseStats.DamageType, // Damage type determined by tower/weapon affixes
                 ProjectileSpeed: weapon.IsProjectile ? 12f : 0,
                 SplashRadius: baseStats.SplashRadius,
                 SlowAmount: baseStats.SlowAmount,
@@ -299,6 +397,219 @@ public sealed class GameSession
             player.PlayerId, packet.AbilityType, packet.TargetX, packet.TargetY);
     }
 
+    public void ProcessItemCollect(uint peerId, ItemCollectPacket packet)
+    {
+        var player = _playerManager.GetPlayer(peerId);
+        if (player == null) return;
+
+        lock (_entitiesLock)
+        {
+            if (!_itemDrops.TryGetValue(packet.DropId, out var drop))
+            {
+                _server.Send(peerId, new ItemCollectAckPacket
+                {
+                    RequestId = packet.RequestId,
+                    Success = false,
+                    DropId = packet.DropId,
+                    ErrorMessage = "Item drop not found"
+                });
+                return;
+            }
+
+            if (drop.IsCollected)
+            {
+                _server.Send(peerId, new ItemCollectAckPacket
+                {
+                    RequestId = packet.RequestId,
+                    Success = false,
+                    DropId = packet.DropId,
+                    ErrorMessage = "Item already collected"
+                });
+                return;
+            }
+
+            // Verify ownership - only the owner can collect
+            if (drop.OwnerId != player.PlayerId)
+            {
+                _server.Send(peerId, new ItemCollectAckPacket
+                {
+                    RequestId = packet.RequestId,
+                    Success = false,
+                    DropId = packet.DropId,
+                    ErrorMessage = "Cannot collect another player's item"
+                });
+                return;
+            }
+
+            drop.IsCollected = true;
+            var itemId = Guid.NewGuid();
+
+            // Publish event for persistence service to create the actual item
+            _eventPublisher.PublishAsync(new
+            {
+                EventType = "item.collected",
+                MatchId = _matchId,
+                PlayerId = drop.OwnerUserId,
+                ItemId = itemId,
+                DropId = drop.DropId,
+                ItemType = (byte)drop.ItemType,
+                Rarity = (byte)drop.Rarity,
+                ItemLevel = drop.ItemLevel,
+                Name = drop.Name,
+                Timestamp = DateTime.UtcNow
+            });
+
+            // Send success ACK to collecting player
+            _server.Send(peerId, new ItemCollectAckPacket
+            {
+                RequestId = packet.RequestId,
+                Success = true,
+                DropId = packet.DropId,
+                ItemId = itemId
+            });
+
+            // Remove drop from tracking
+            _itemDrops.Remove(packet.DropId);
+
+            _logger.LogDebug("Player {PlayerId} collected item drop {DropId} ({Name})",
+                player.PlayerId, drop.DropId, drop.Name);
+        }
+    }
+
+    private void TrySpawnItemDrop(Unit unit, Tower killerTower)
+    {
+        // Calculate drop chance based on unit type
+        var baseDropChance = unit.Type switch
+        {
+            UnitType.Boss => 0.5f,
+            UnitType.Tank => 0.15f,
+            UnitType.Fast => 0.08f,
+            _ => 0.05f
+        };
+
+        // Apply unit rarity multiplier to drop chance
+        var rarityDropMultiplier = unit.Rarity switch
+        {
+            UnitRarity.Magic => UnitModifierConstants.MagicDropChanceMultiplier,
+            UnitRarity.Rare => UnitModifierConstants.RareDropChanceMultiplier,
+            _ => 1f
+        };
+
+        // Item find bonus not currently in skill tree - could be added via equipment affixes later
+        var itemFindBonus = 0f;
+        var finalDropChance = baseDropChance * rarityDropMultiplier * (1 + itemFindBonus / 100f);
+
+        if (_random.NextDouble() > finalDropChance)
+            return;
+
+        // Roll item rarity - magic/rare units drop better items
+        var rarity = RollDropRarity(unit.Type, unit.Rarity);
+
+        // Roll item type
+        var itemType = (ItemType)_random.Next(3);
+
+        // Generate item name based on type and rarity
+        var itemName = GenerateItemName(itemType, rarity);
+
+        // Calculate item level based on wave
+        var itemLevel = Math.Max(1, _currentWave);
+
+        var drop = new ServerItemDrop
+        {
+            DropId = ++_nextEntityId,
+            X = unit.X,
+            Y = unit.Y,
+            ItemType = itemType,
+            Rarity = rarity,
+            ItemLevel = itemLevel,
+            Name = itemName,
+            OwnerId = killerTower.OwnerId,
+            OwnerUserId = killerTower.OwnerUserId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        lock (_entitiesLock)
+        {
+            _itemDrops[drop.DropId] = drop;
+        }
+
+        BroadcastItemDrop(drop);
+
+        _logger.LogDebug("Item dropped at ({X}, {Y}): {Name} ({Rarity}) for player {PlayerId}",
+            drop.X, drop.Y, drop.Name, drop.Rarity, drop.OwnerId);
+    }
+
+    private ItemRarity RollDropRarity(UnitType unitType, UnitRarity unitRarity = UnitRarity.Normal)
+    {
+        var roll = _random.Next(100);
+
+        // Base thresholds
+        var rareThreshold = ItemDropConstants.RareWeight;
+        var magicThreshold = ItemDropConstants.RareWeight + ItemDropConstants.MagicWeight;
+
+        // Bosses have better drop rates
+        if (unitType == UnitType.Boss)
+        {
+            rareThreshold = 15;
+            magicThreshold = 50;
+        }
+
+        // Magic/Rare units have better drop rates
+        if (unitRarity == UnitRarity.Magic)
+        {
+            rareThreshold += 5;
+            magicThreshold += 15;
+        }
+        else if (unitRarity == UnitRarity.Rare)
+        {
+            rareThreshold += 15;
+            magicThreshold += 30;
+        }
+
+        if (roll < rareThreshold)
+            return ItemRarity.Rare;
+        if (roll < magicThreshold)
+            return ItemRarity.Magic;
+        return ItemRarity.Normal;
+    }
+
+    private string GenerateItemName(ItemType itemType, ItemRarity rarity)
+    {
+        var prefixes = rarity switch
+        {
+            ItemRarity.Rare => new[] { "Superior", "Exquisite", "Masterwork", "Ancient" },
+            ItemRarity.Magic => new[] { "Enchanted", "Mystic", "Arcane", "Glowing" },
+            _ => new[] { "Basic", "Simple", "Common", "Plain" }
+        };
+
+        var typeNames = itemType switch
+        {
+            ItemType.Weapon => new[] { "Sword", "Bow", "Staff", "Axe", "Dagger" },
+            ItemType.Shield => new[] { "Shield", "Buckler", "Tower Shield", "Aegis" },
+            _ => new[] { "Ring", "Amulet", "Charm", "Talisman" }
+        };
+
+        var prefix = prefixes[_random.Next(prefixes.Length)];
+        var typeName = typeNames[_random.Next(typeNames.Length)];
+
+        return $"{prefix} {typeName}";
+    }
+
+    private void BroadcastItemDrop(ServerItemDrop drop)
+    {
+        _server.Broadcast(new ItemDropPacket
+        {
+            DropId = drop.DropId,
+            X = drop.X,
+            Y = drop.Y,
+            ItemType = drop.ItemType,
+            Rarity = drop.Rarity,
+            ItemLevel = drop.ItemLevel,
+            Name = drop.Name,
+            OwnerId = drop.OwnerId
+        });
+    }
+
     public void StartMatch(GameMode mode, MapInfo map)
     {
         var players = _playerManager.GetAllPlayers();
@@ -373,9 +684,18 @@ public sealed class GameSession
 
             foreach (var unit in _units.Values)
             {
+                // Movement
                 unit.X += unit.DirectionX * unit.Speed * deltaTime;
                 unit.Y += unit.DirectionY * unit.Speed * deltaTime;
 
+                // Regenerating modifier - heal over time
+                if (unit.HasModifier(UnitModifier.Regenerating) && unit.Health < unit.MaxHealth)
+                {
+                    var regenAmount = (int)(unit.MaxHealth * UnitModifierConstants.RegenerationPerSecond * deltaTime);
+                    unit.Health = Math.Min(unit.Health + regenAmount, unit.MaxHealth);
+                }
+
+                // Check if reached end
                 if (unit.X < 0 || unit.X > GameConstants.DefaultMapWidth * GameConstants.GridCellSize)
                 {
                     DamagePlayer(unit);
@@ -471,7 +791,19 @@ public sealed class GameSession
 
     private void ApplyDamageToUnit(Unit unit, int damage, Tower tower, bool isCrit)
     {
-        unit.Health -= damage;
+        // Check for Shielded modifier - blocks first hit
+        if (unit.ShieldActive && unit.HasModifier(UnitModifier.Shielded))
+        {
+            unit.ShieldActive = false;
+            _logger.LogDebug("Unit {EntityId} shield absorbed hit", unit.EntityId);
+            return;
+        }
+
+        // Apply resistance based on tower's damage type
+        var resistance = unit.GetResistance(tower.Stats.DamageType);
+        var finalDamage = (int)(damage * (1f - resistance));
+
+        unit.Health -= finalDamage;
 
         if (unit.Health <= 0)
         {
@@ -484,8 +816,16 @@ public sealed class GameSession
 
             var stats = UnitDefinitions.GetStats(unit.Type);
 
-            // Apply gold find bonus
+            // Calculate gold reward with rarity multiplier
             var goldReward = stats.GoldReward;
+            goldReward = unit.Rarity switch
+            {
+                UnitRarity.Magic => (int)(goldReward * UnitModifierConstants.MagicGoldMultiplier),
+                UnitRarity.Rare => (int)(goldReward * UnitModifierConstants.RareGoldMultiplier),
+                _ => goldReward
+            };
+
+            // Apply gold find bonus
             if (tower.Bonuses != null && tower.Bonuses.GoldFindPercent > 0)
             {
                 goldReward = (int)(goldReward * (1 + tower.Bonuses.GoldFindPercent / 100));
@@ -494,8 +834,15 @@ public sealed class GameSession
             _playerManager.ModifyGold(tower.OwnerId, goldReward);
             _playerManager.AddScore(tower.OwnerId, stats.ScoreValue);
 
-            // Accumulate XP for the tower type
+            // Calculate XP with rarity multiplier
             var xpAmount = TowerProgressionConstants.XpSources.UnitKill;
+            xpAmount = unit.Rarity switch
+            {
+                UnitRarity.Magic => (int)(xpAmount * UnitModifierConstants.MagicXpMultiplier),
+                UnitRarity.Rare => (int)(xpAmount * UnitModifierConstants.RareXpMultiplier),
+                _ => xpAmount
+            };
+
             if (unit.Type == UnitType.Boss)
             {
                 xpAmount += TowerProgressionConstants.XpSources.BossKill;
@@ -511,6 +858,9 @@ public sealed class GameSession
 
             BroadcastEntityDestroy(unit.EntityId, DestroyReason.Killed);
 
+            // Try to spawn an item drop (with rarity bonus)
+            TrySpawnItemDrop(unit, tower);
+
             // Publish unit killed event with tower info
             _eventPublisher.PublishAsync(new
             {
@@ -519,6 +869,7 @@ public sealed class GameSession
                 PlayerId = tower.OwnerUserId,
                 UnitId = unit.EntityId,
                 UnitType = (byte)unit.Type,
+                UnitRarity = (byte)unit.Rarity,
                 KillerTowerId = tower.EntityId,
                 GoldAwarded = goldReward,
                 IsCritical = isCrit,
@@ -640,6 +991,12 @@ public sealed class GameSession
                 _unitsLeakedThisWave = 0;
 
                 _logger.LogInformation("Wave {Wave} completed (perfect: {IsPerfect})", _currentWave, isPerfectWave);
+
+                // Auto-start next wave after a short delay (for solo mode)
+                if (_gameMode == GameMode.Solo)
+                {
+                    _waveStartDelay = 5f; // 5 seconds between waves
+                }
             }
         }
     }
@@ -814,6 +1171,30 @@ public sealed class GameSession
             for (var i = 0; i < spawnInfo.Count; i++)
             {
                 var stats = UnitDefinitions.ScaleForWave(spawnInfo.Type, _currentWave);
+
+                // Roll rarity
+                var (rarity, modifiers) = RollUnitRarity();
+
+                // Calculate modified stats
+                var baseHealth = stats.Health;
+                var baseSpeed = stats.Speed * GameConstants.GridCellSize;
+
+                var healthMultiplier = 1f;
+                var speedMultiplier = 1f;
+
+                // Apply modifier stat bonuses
+                if ((modifiers & UnitModifier.Tough) != 0)
+                    healthMultiplier += UnitModifierConstants.ToughHealthBonus;
+                if ((modifiers & UnitModifier.Armored) != 0)
+                    healthMultiplier += UnitModifierConstants.ArmoredHealthBonus;
+                if ((modifiers & UnitModifier.Swift) != 0)
+                    speedMultiplier += UnitModifierConstants.SwiftSpeedBonus;
+                if ((modifiers & UnitModifier.Hasted) != 0)
+                    speedMultiplier += UnitModifierConstants.HasteSpeedBonus;
+
+                var finalHealth = (int)(baseHealth * healthMultiplier);
+                var finalSpeed = baseSpeed * speedMultiplier;
+
                 var unit = new Unit
                 {
                     EntityId = ++_nextEntityId,
@@ -822,9 +1203,13 @@ public sealed class GameSession
                     Y = GameConstants.GridCellSize * 5 + i * 20,
                     DirectionX = 1,
                     DirectionY = 0,
-                    Health = stats.Health,
-                    MaxHealth = stats.Health,
-                    Speed = stats.Speed * GameConstants.GridCellSize
+                    Health = finalHealth,
+                    MaxHealth = finalHealth,
+                    Speed = finalSpeed,
+                    BaseSpeed = finalSpeed,
+                    Rarity = rarity,
+                    Modifiers = modifiers,
+                    ShieldActive = (modifiers & UnitModifier.Shielded) != 0
                 };
 
                 lock (_entitiesLock)
@@ -833,8 +1218,54 @@ public sealed class GameSession
                 }
 
                 BroadcastEntitySpawn(unit);
+
+                if (rarity != UnitRarity.Normal)
+                {
+                    _logger.LogDebug("Spawned {Rarity} unit {EntityId} with modifiers: {Modifiers}",
+                        rarity, unit.EntityId, modifiers);
+                }
             }
         }
+    }
+
+    private (UnitRarity rarity, UnitModifier modifiers) RollUnitRarity()
+    {
+        var roll = _random.Next(100);
+
+        UnitRarity rarity;
+        int modifierCount;
+
+        if (roll < UnitModifierConstants.RareChance)
+        {
+            rarity = UnitRarity.Rare;
+            modifierCount = _random.Next(
+                UnitModifierConstants.RareModifierMin,
+                UnitModifierConstants.RareModifierMax + 1);
+        }
+        else if (roll < UnitModifierConstants.RareChance + UnitModifierConstants.MagicChance)
+        {
+            rarity = UnitRarity.Magic;
+            modifierCount = _random.Next(
+                UnitModifierConstants.MagicModifierMin,
+                UnitModifierConstants.MagicModifierMax + 1);
+        }
+        else
+        {
+            return (UnitRarity.Normal, UnitModifier.None);
+        }
+
+        // Roll modifiers
+        var modifiers = UnitModifier.None;
+        var availableModifiers = UnitModifierConstants.AllModifiers.ToList();
+
+        for (int i = 0; i < modifierCount && availableModifiers.Count > 0; i++)
+        {
+            var index = _random.Next(availableModifiers.Count);
+            modifiers |= availableModifiers[index];
+            availableModifiers.RemoveAt(index);
+        }
+
+        return (rarity, modifiers);
     }
 
     private WaveInfo GenerateWaveInfo(int waveNumber)
@@ -917,6 +1348,14 @@ public sealed class GameSession
 
     private void BroadcastEntitySpawn(Unit unit)
     {
+        // Pack unit rarity and modifiers into ExtraData
+        // Format: [0] = UnitType, [1] = Rarity, [2-5] = Modifiers (uint)
+        var extraData = new byte[6];
+        extraData[0] = (byte)unit.Type;
+        extraData[1] = (byte)unit.Rarity;
+        var modifierBytes = BitConverter.GetBytes((uint)unit.Modifiers);
+        Array.Copy(modifierBytes, 0, extraData, 2, 4);
+
         _server.Broadcast(new EntitySpawnPacket
         {
             Tick = _currentTick,
@@ -928,7 +1367,8 @@ public sealed class GameSession
                 Y = unit.Y,
                 Rotation = 0,
                 Health = unit.Health,
-                MaxHealth = unit.MaxHealth
+                MaxHealth = unit.MaxHealth,
+                ExtraData = extraData
             }
         });
     }
@@ -1020,7 +1460,61 @@ public sealed class Unit
     public float Y { get; set; }
     public float DirectionX { get; set; }
     public float DirectionY { get; set; }
-    public float Speed { get; init; }
+    public float Speed { get; set; }
+    public float BaseSpeed { get; init; }
     public int Health { get; set; }
     public int MaxHealth { get; init; }
+
+    // Rarity system
+    public UnitRarity Rarity { get; init; } = UnitRarity.Normal;
+    public UnitModifier Modifiers { get; init; } = UnitModifier.None;
+    public bool ShieldActive { get; set; } = true; // For Shielded modifier
+
+    /// <summary>
+    /// Check if unit has a specific modifier
+    /// </summary>
+    public bool HasModifier(UnitModifier modifier) => (Modifiers & modifier) != 0;
+
+    /// <summary>
+    /// Get damage resistance for a specific damage type
+    /// </summary>
+    public float GetResistance(DamageType damageType)
+    {
+        float resistance = 0f;
+
+        // Armored gives resistance to all damage
+        if (HasModifier(UnitModifier.Armored))
+            resistance += UnitModifierConstants.ArmoredResistanceAmount;
+
+        // Specific resistances
+        var resistMod = damageType switch
+        {
+            DamageType.Physical => UnitModifier.PhysicalResistance,
+            DamageType.Fire => UnitModifier.FireResistance,
+            DamageType.Cold => UnitModifier.ColdResistance,
+            DamageType.Lightning => UnitModifier.LightningResistance,
+            DamageType.Chaos => UnitModifier.PoisonResistance, // Chaos uses poison resistance
+            _ => UnitModifier.None
+        };
+
+        if (resistMod != UnitModifier.None && HasModifier(resistMod))
+            resistance += UnitModifierConstants.ElementalResistanceAmount;
+
+        return Math.Min(resistance, 0.75f); // Cap at 75% resistance
+    }
+}
+
+public sealed class ServerItemDrop
+{
+    public uint DropId { get; init; }
+    public float X { get; init; }
+    public float Y { get; init; }
+    public ItemType ItemType { get; init; }
+    public ItemRarity Rarity { get; init; }
+    public int ItemLevel { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public uint OwnerId { get; init; }
+    public Guid OwnerUserId { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public bool IsCollected { get; set; }
 }

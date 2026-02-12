@@ -64,7 +64,7 @@ public class ENetServer : IDisposable
         }
     }
 
-    public void Send(uint peerId, IPacket packet, PacketFlags flags = PacketFlags.Reliable)
+    public void Send<T>(uint peerId, T packet, PacketFlags flags = PacketFlags.Reliable) where T : IPacket
     {
         lock (_peersLock)
         {
@@ -80,7 +80,7 @@ public class ENetServer : IDisposable
         }
     }
 
-    public void Broadcast(IPacket packet, PacketFlags flags = PacketFlags.Reliable)
+    public void Broadcast<T>(T packet, PacketFlags flags = PacketFlags.Reliable) where T : IPacket
     {
         var data = PacketSerializer.Serialize(packet);
 
@@ -96,7 +96,7 @@ public class ENetServer : IDisposable
         }
     }
 
-    public void BroadcastExcept(uint excludePeerId, IPacket packet, PacketFlags flags = PacketFlags.Reliable)
+    public void BroadcastExcept<T>(uint excludePeerId, T packet, PacketFlags flags = PacketFlags.Reliable) where T : IPacket
     {
         var data = PacketSerializer.Serialize(packet);
 

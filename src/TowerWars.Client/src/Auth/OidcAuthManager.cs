@@ -16,12 +16,13 @@ public partial class OidcAuthManager : Node
     private const string Authority = "https://identity.harker.dev/tenant/harker";
     private const string ClientId = "tower-wars-godot";
     private const string RedirectUri = "http://localhost:8080/callback";
-    private const string Scope = "openid profile email";
+    private const string Scope = "openid profile email offline_access";
 
     private HttpServer _callbackServer = null!;
     private string _codeVerifier = null!;
     private string _state = null!;
     private TaskCompletionSource<string> _authCodeReceived = null!;
+    private OidcDiscoveryDocument? _discoveryDocument;
 
     public string? AccessToken { get; private set; }
     public string? RefreshToken { get; private set; }
@@ -41,17 +42,51 @@ public partial class OidcAuthManager : Node
         AddChild(_callbackServer);
     }
 
+    private async Task<OidcDiscoveryDocument?> GetDiscoveryDocumentAsync()
+    {
+        if (_discoveryDocument != null)
+            return _discoveryDocument;
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            var discoveryUrl = $"{Authority}/.well-known/openid-configuration";
+            GD.Print($"Fetching OIDC discovery document from: {discoveryUrl}");
+
+            var response = await httpClient.GetStringAsync(discoveryUrl);
+            _discoveryDocument = JsonSerializer.Deserialize<OidcDiscoveryDocument>(response);
+
+            GD.Print($"Authorization endpoint: {_discoveryDocument?.AuthorizationEndpoint}");
+            GD.Print($"Token endpoint: {_discoveryDocument?.TokenEndpoint}");
+
+            return _discoveryDocument;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"Failed to fetch discovery document: {ex.Message}");
+            return null;
+        }
+    }
+
     public async Task<bool> LoginAsync()
     {
         try
         {
+            // Fetch discovery document
+            var discovery = await GetDiscoveryDocumentAsync();
+            if (discovery == null)
+            {
+                EmitSignal(SignalName.AuthenticationFailed, "Failed to fetch OIDC configuration");
+                return false;
+            }
+
             // Generate PKCE parameters
             _codeVerifier = GenerateCodeVerifier();
             var codeChallenge = GenerateCodeChallenge(_codeVerifier);
             _state = GenerateState();
 
-            // Build authorization URL
-            var authUrl = $"{Authority}/protocol/openid-connect/auth?" +
+            // Build authorization URL using discovered endpoint
+            var authUrl = $"{discovery.AuthorizationEndpoint}?" +
                          $"client_id={ClientId}&" +
                          $"redirect_uri={Uri.EscapeDataString(RedirectUri)}&" +
                          $"response_type=code&" +
@@ -107,8 +142,9 @@ public partial class OidcAuthManager : Node
         }
         else if (parameters.TryGetValue("error", out var error))
         {
-            GD.PrintErr($"OAuth error: {error}");
-            _authCodeReceived?.TrySetException(new Exception(error));
+            var errorDescription = parameters.TryGetValue("error_description", out var desc) ? desc : error;
+            GD.PrintErr($"OAuth error: {errorDescription}");
+            _authCodeReceived?.TrySetException(new Exception(errorDescription));
         }
     }
 
@@ -116,8 +152,14 @@ public partial class OidcAuthManager : Node
     {
         try
         {
+            var discovery = await GetDiscoveryDocumentAsync();
+            if (discovery?.TokenEndpoint == null)
+            {
+                GD.PrintErr("Token endpoint not available");
+                return false;
+            }
+
             using var httpClient = new HttpClient();
-            var tokenEndpoint = $"{Authority}/protocol/openid-connect/token";
 
             var requestBody = new Dictionary<string, string>
             {
@@ -128,7 +170,7 @@ public partial class OidcAuthManager : Node
                 ["code_verifier"] = _codeVerifier
             };
 
-            var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
+            var request = new HttpRequestMessage(HttpMethod.Post, discovery.TokenEndpoint)
             {
                 Content = new FormUrlEncodedContent(requestBody)
             };
@@ -144,9 +186,9 @@ public partial class OidcAuthManager : Node
 
             var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent);
 
-            AccessToken = tokenResponse.AccessToken;
-            RefreshToken = tokenResponse.RefreshToken;
-            IdToken = tokenResponse.IdToken;
+            AccessToken = tokenResponse?.AccessToken;
+            RefreshToken = tokenResponse?.RefreshToken;
+            IdToken = tokenResponse?.IdToken;
 
             GD.Print("Authentication successful!");
             return true;
@@ -165,8 +207,11 @@ public partial class OidcAuthManager : Node
 
         try
         {
+            var discovery = await GetDiscoveryDocumentAsync();
+            if (discovery?.TokenEndpoint == null)
+                return false;
+
             using var httpClient = new HttpClient();
-            var tokenEndpoint = $"{Authority}/protocol/openid-connect/token";
 
             var requestBody = new Dictionary<string, string>
             {
@@ -175,7 +220,7 @@ public partial class OidcAuthManager : Node
                 ["client_id"] = ClientId
             };
 
-            var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
+            var request = new HttpRequestMessage(HttpMethod.Post, discovery.TokenEndpoint)
             {
                 Content = new FormUrlEncodedContent(requestBody)
             };
@@ -191,10 +236,10 @@ public partial class OidcAuthManager : Node
 
             var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent);
 
-            AccessToken = tokenResponse.AccessToken;
-            if (!string.IsNullOrEmpty(tokenResponse.RefreshToken))
+            AccessToken = tokenResponse?.AccessToken;
+            if (!string.IsNullOrEmpty(tokenResponse?.RefreshToken))
                 RefreshToken = tokenResponse.RefreshToken;
-            IdToken = tokenResponse.IdToken;
+            IdToken = tokenResponse?.IdToken;
 
             GD.Print("Token refreshed successfully!");
             return true;
@@ -211,13 +256,15 @@ public partial class OidcAuthManager : Node
         AccessToken = null;
         RefreshToken = null;
         IdToken = null;
+        _discoveryDocument = null;
         GD.Print("Logged out");
     }
 
     private string GenerateCodeVerifier()
     {
         var bytes = new byte[32];
-        new Random().NextBytes(bytes);
+        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
         return Convert.ToBase64String(bytes)
             .TrimEnd('=')
             .Replace('+', '-')
@@ -237,19 +284,50 @@ public partial class OidcAuthManager : Node
     private string GenerateState()
     {
         var bytes = new byte[16];
-        new Random().NextBytes(bytes);
+        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
         return Convert.ToBase64String(bytes)
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
     }
 
+    private class OidcDiscoveryDocument
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("authorization_endpoint")]
+        public string? AuthorizationEndpoint { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("token_endpoint")]
+        public string? TokenEndpoint { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("userinfo_endpoint")]
+        public string? UserInfoEndpoint { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("end_session_endpoint")]
+        public string? EndSessionEndpoint { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("jwks_uri")]
+        public string? JwksUri { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("issuer")]
+        public string? Issuer { get; set; }
+    }
+
     private class TokenResponse
     {
+        [System.Text.Json.Serialization.JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = null!;
-        public string RefreshToken { get; set; } = null!;
-        public string IdToken { get; set; } = null!;
+
+        [System.Text.Json.Serialization.JsonPropertyName("refresh_token")]
+        public string? RefreshToken { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("id_token")]
+        public string? IdToken { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("token_type")]
         public string TokenType { get; set; } = null!;
     }
 }

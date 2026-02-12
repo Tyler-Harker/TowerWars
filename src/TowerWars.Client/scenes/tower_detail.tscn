@@ -1,0 +1,111 @@
+[gd_scene load_steps=2 format=3 uid="uid://towerdetail001"]
+
+[ext_resource type="Script" path="res://src/UI/TowerDetail.cs" id="1_towerdetail"]
+
+[node name="TowerDetail" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_towerdetail")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 20
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="Header" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="MarginContainer/VBoxContainer/Header"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "< Back"
+
+[node name="TowerNameLabel" type="Label" parent="MarginContainer/VBoxContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 28
+horizontal_alignment = 1
+
+[node name="ContentArea" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 20
+
+[node name="TowerInfoPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/TowerInfoPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="StatsTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentArea/TowerInfoPanel/VBoxContainer"]
+layout_mode = 2
+text = "Tower Stats"
+theme_override_font_sizes/font_size = 20
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer/ContentArea/TowerInfoPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="StatsContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/TowerInfoPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="EquipmentPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/EquipmentPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="EquipmentTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentArea/EquipmentPanel/VBoxContainer"]
+layout_mode = 2
+text = "Equipment"
+theme_override_font_sizes/font_size = 20
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer/ContentArea/EquipmentPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="SlotsContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/EquipmentPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="InventoryPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/InventoryPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="InventoryTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentArea/InventoryPanel/VBoxContainer"]
+layout_mode = 2
+text = "Inventory"
+theme_override_font_sizes/font_size = 20
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer/ContentArea/InventoryPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer/ContentArea/InventoryPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="InventoryList" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentArea/InventoryPanel/VBoxContainer/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
