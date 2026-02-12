@@ -6,6 +6,7 @@ using TowerWars.Client.Autoloads;
 using TowerWars.Client.Data;
 using TowerWars.Client.Services;
 using TowerWars.Shared.Constants;
+using TowerWars.Shared.Protocol;
 
 namespace TowerWars.Client.UI;
 
@@ -39,36 +40,144 @@ public partial class Dashboard : Control
         _logoutButton?.Connect("pressed", Callable.From(OnLogoutPressed));
 
         LoadPlayerData();
-        LoadTowersFromServer();
+
+        // Subscribe to player data events from ENet
+        if (GameManager.Instance?.PacketHandler != null)
+        {
+            GameManager.Instance.PacketHandler.PlayerTowersReceived += OnPlayerTowersReceived;
+            GameManager.Instance.PacketHandler.PlayerItemsReceived += OnPlayerItemsReceived;
+        }
+
+        // Connect to ZoneServer and request data via UDP
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.AutoSceneSwitch = false;
+            GameManager.Instance.Network.Connected += OnNetworkConnected;
+            GameManager.Instance.Network.Disconnected += OnNetworkDisconnected;
+
+            if (GameManager.Instance.Network.IsConnected)
+            {
+                RequestPlayerData();
+            }
+            else
+            {
+                _isLoadingTowers = true;
+                UpdateTowersListLoading();
+                GameManager.Instance.ConnectToServer();
+            }
+        }
+
         UpdateUI();
     }
+
+    public override void _ExitTree()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.AutoSceneSwitch = true;
+            GameManager.Instance.Network.Connected -= OnNetworkConnected;
+            GameManager.Instance.Network.Disconnected -= OnNetworkDisconnected;
+        }
+        if (GameManager.Instance?.PacketHandler != null)
+        {
+            GameManager.Instance.PacketHandler.PlayerTowersReceived -= OnPlayerTowersReceived;
+            GameManager.Instance.PacketHandler.PlayerItemsReceived -= OnPlayerItemsReceived;
+        }
+    }
+
+    private void OnNetworkConnected()
+    {
+        GD.Print("Connected to ZoneServer from Dashboard, requesting player data...");
+        RequestPlayerData();
+    }
+
+    private void OnNetworkDisconnected(string reason)
+    {
+        _isLoadingTowers = false;
+        GD.PrintErr($"ZoneServer connection lost: {reason}");
+    }
+
+    private void RequestPlayerData()
+    {
+        _isLoadingTowers = true;
+        UpdateTowersListLoading();
+        GameManager.Instance?.Network.SendPlayerDataRequest();
+    }
+
+    private void OnPlayerTowersReceived(PlayerTowersResponsePacket response)
+    {
+        if (!response.Success)
+        {
+            GD.PrintErr($"Failed to get towers: {response.ErrorMessage}");
+            _isLoadingTowers = false;
+            UpdateTowersList();
+            return;
+        }
+
+        _serverTowers = response.Towers.Select(MapFromWire).ToList();
+        SyncLocalDataWithServer();
+        _isLoadingTowers = false;
+        UpdateTowersList();
+    }
+
+    private void OnPlayerItemsReceived(PlayerItemsResponsePacket response)
+    {
+        if (!response.Success)
+        {
+            GD.PrintErr($"Failed to get items: {response.ErrorMessage}");
+            return;
+        }
+
+        _playerItems = response.Items.Select(MapFromWire).ToList();
+        UpdateTowersList();
+    }
+
+    private static ServerTower MapFromWire(WirePlayerTower w) => new()
+    {
+        Id = w.Id,
+        UserId = w.UserId,
+        Name = w.Name,
+        WeaponType = (WeaponType)w.WeaponType,
+        DamageType = (DamageType)w.DamageType,
+        Level = w.Level,
+        Experience = w.Experience,
+        SkillPoints = w.SkillPoints,
+        BaseDamage = w.BaseDamage,
+        BaseAttackSpeed = w.BaseAttackSpeed,
+        BaseRange = w.BaseRange,
+        BaseCritChance = w.BaseCritChance,
+        BaseCritDamage = w.BaseCritDamage,
+        SkillAllocations = w.SkillAllocations.Select(s => new ServerSkillAllocation
+        {
+            Id = s.Id, TowerId = s.TowerId, SkillId = s.SkillId, Points = s.Points
+        }).ToList(),
+        EquippedItems = w.EquippedItems.Select(e => new ServerEquippedItem
+        {
+            Id = e.Id, TowerId = e.TowerId, ItemId = e.ItemId, Slot = e.Slot,
+            Item = e.Item != null ? MapFromWire(e.Item) : null
+        }).ToList()
+    };
+
+    private static ServerItem MapFromWire(WirePlayerItem w) => new()
+    {
+        Id = w.Id,
+        UserId = w.UserId,
+        Name = w.Name,
+        TowerItemType = (TowerItemType)w.ItemType,
+        Rarity = (TowerItemRarity)w.Rarity,
+        ItemLevel = w.ItemLevel,
+        BaseStatsJson = w.BaseStatsJson,
+        AffixesJson = w.AffixesJson,
+        IsEquipped = w.IsEquipped,
+        DroppedAt = DateTimeOffset.FromUnixTimeMilliseconds(w.DroppedAtUnixMs).UtcDateTime,
+        CollectedAt = w.CollectedAtUnixMs.HasValue
+            ? DateTimeOffset.FromUnixTimeMilliseconds(w.CollectedAtUnixMs.Value).UtcDateTime
+            : null
+    };
 
     private void LoadPlayerData()
     {
         _playerData = PlayerData.Load();
-    }
-
-    private async void LoadTowersFromServer()
-    {
-        if (GameManager.Instance?.Api == null)
-        {
-            GD.Print("API client not available, using local data");
-            return;
-        }
-
-        _isLoadingTowers = true;
-        UpdateTowersListLoading();
-
-        _serverTowers = await GameManager.Instance.Api.GetTowersAsync();
-
-        // Sync local data with server data
-        SyncLocalDataWithServer();
-
-        // Load player items
-        _playerItems = await GameManager.Instance.Api.GetItemsAsync();
-
-        _isLoadingTowers = false;
-        UpdateTowersList();
     }
 
     private void SyncLocalDataWithServer()
@@ -629,7 +738,8 @@ public partial class Dashboard : Control
         var success = await GameManager.Instance.Api.EquipItemAsync(_selectedTower.Id, itemId, slot);
         if (success)
         {
-            await RefreshDataAndUI();
+            // Re-request data from server via UDP
+            RequestPlayerData();
         }
         else
         {
@@ -644,35 +754,12 @@ public partial class Dashboard : Control
         var success = await GameManager.Instance.Api.UnequipItemAsync(_selectedTower.Id, slot);
         if (success)
         {
-            await RefreshDataAndUI();
+            // Re-request data from server via UDP
+            RequestPlayerData();
         }
         else
         {
             GD.PrintErr("Failed to unequip item");
-        }
-    }
-
-    private async System.Threading.Tasks.Task RefreshDataAndUI()
-    {
-        if (GameManager.Instance?.Api == null) return;
-
-        // Refresh towers and items
-        _serverTowers = await GameManager.Instance.Api.GetTowersAsync();
-        _playerItems = await GameManager.Instance.Api.GetItemsAsync();
-
-        // Update selected tower reference
-        if (_selectedTower != null)
-        {
-            _selectedTower = _serverTowers.FirstOrDefault(t => t.Id == _selectedTower.Id);
-        }
-
-        SyncLocalDataWithServer();
-        UpdateTowersList();
-
-        // Refresh equipment panel if open
-        if (_equipmentPanel != null && _selectedTower != null)
-        {
-            ShowEquipmentPanel();
         }
     }
 

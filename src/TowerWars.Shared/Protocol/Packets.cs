@@ -229,6 +229,9 @@ public sealed class TowerBuildPacket : IPacket
 
     [Key(3)]
     public required int GridY { get; init; }
+
+    [Key(4)]
+    public required Guid PlayerTowerId { get; init; }
 }
 
 [MessagePackObject]
@@ -519,4 +522,42 @@ public sealed class ItemCollectAckPacket : IPacket
 
     [Key(4)]
     public string? ErrorMessage { get; init; }
+}
+
+// Session Management
+
+[MessagePackObject]
+public sealed class RequestMatchPacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.RequestMatch;
+
+    [Key(0)]
+    public required GameMode Mode { get; init; }
+
+    [Key(1)]
+    public byte Tier { get; init; }
+}
+
+[MessagePackObject]
+public sealed class RequestMatchAckPacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.RequestMatchAck;
+
+    [Key(0)]
+    public required bool Success { get; init; }
+
+    [Key(1)]
+    public Guid? MatchId { get; init; }
+
+    [Key(2)]
+    public string? ErrorMessage { get; init; }
+}
+
+[MessagePackObject]
+public sealed class ReturnToLobbyPacket : IPacket
+{
+    [IgnoreMember]
+    public PacketType Type => PacketType.ReturnToLobby;
 }

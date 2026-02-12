@@ -1,31 +1,32 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using TowerWars.Shared.Constants;
 using TowerWars.Shared.DTOs;
 using TowerWars.Shared.Protocol;
-using TowerWars.ZoneServer.Networking;
 using TowerWars.ZoneServer.Services;
 
 namespace TowerWars.ZoneServer.Game;
 
 public sealed class GameSession
 {
-    private readonly ILogger<GameSession> _logger;
-    private readonly Lazy<ENetServer> _serverLazy;
-    private ENetServer _server => _serverLazy.Value;
-    private readonly PlayerManager _playerManager;
+    private readonly ILogger _logger;
+    private readonly SessionPlayerManager _playerManager;
     private readonly IEventPublisher _eventPublisher;
     private readonly ITowerBonusService _towerBonusService;
+    private readonly Action<uint, IPacket> _send;
+    private readonly Action<IPacket> _broadcast;
     private readonly Random _random = new();
 
     private readonly Dictionary<uint, Tower> _towers = new();
     private readonly Dictionary<uint, Unit> _units = new();
     private readonly Dictionary<uint, ServerItemDrop> _itemDrops = new();
     private readonly object _entitiesLock = new();
+    private readonly ConcurrentQueue<Action> _pendingActions = new();
 
-    // Track XP per tower type per player
-    private readonly Dictionary<(Guid PlayerId, TowerType TowerType), int> _towerXpAccumulated = new();
-    // Track purchase count per tower type per player for cost scaling
-    private readonly Dictionary<(Guid PlayerId, TowerType TowerType), int> _towerPurchaseCounts = new();
+    // Track XP per player tower (by PlayerTowerId)
+    private readonly Dictionary<Guid, int> _towerXpAccumulated = new();
+    // Track purchase count per player tower (by PlayerTowerId) for cost scaling
+    private readonly Dictionary<Guid, int> _towerPurchaseCounts = new();
     // Track kills this wave for perfect wave bonus
     private int _unitsKilledThisWave;
     private int _unitsLeakedThisWave;
@@ -34,11 +35,12 @@ public sealed class GameSession
     private uint _currentTick;
     private int _currentWave;
     private GameState _state = GameState.WaitingForPlayers;
-    private readonly Guid _matchId = Guid.NewGuid();
+    private readonly Guid _matchId;
 
     public Guid MatchId => _matchId;
     public GameState State => _state;
     public int CurrentWave => _currentWave;
+    public SessionPlayerManager PlayerManager => _playerManager;
 
     private bool _isPaused;
     private string? _pauseReason;
@@ -51,38 +53,45 @@ public sealed class GameSession
     public bool IsPaused => _isPaused;
     public string? PauseReason => _pauseReason;
 
+    public event Action<GameSession>? OnSessionEnded;
+
     public GameSession(
-        ILogger<GameSession> logger,
-        Lazy<ENetServer> server,
-        PlayerManager playerManager,
+        Guid matchId,
+        ILogger logger,
+        SessionPlayerManager playerManager,
         IEventPublisher eventPublisher,
-        ITowerBonusService towerBonusService)
+        ITowerBonusService towerBonusService,
+        Action<uint, IPacket> send,
+        Action<IPacket> broadcast)
     {
+        _matchId = matchId;
         _logger = logger;
-        _serverLazy = server;
         _playerManager = playerManager;
         _eventPublisher = eventPublisher;
         _towerBonusService = towerBonusService;
+        _send = send;
+        _broadcast = broadcast;
 
         _playerManager.OnAllPlayersReady += HandleAllPlayersReady;
         _playerManager.OnPlayerJoined += HandlePlayerJoined;
     }
 
-    private void HandlePlayerJoined(ServerPlayer player)
+    private void HandlePlayerJoined(SessionPlayer player)
     {
         _logger.LogInformation("Player {PlayerId} joined, current state: {State}", player.PlayerId, _state);
-
-        // For solo mode, auto-start when a player joins
-        // Use delay timers that the Update loop will process (thread-safe)
-        if (_state == GameState.WaitingForPlayers && _gameMode == GameMode.Solo)
-        {
-            _autoStartDelay = 0.5f; // Start match after 0.5 seconds
-        }
+        // Match starts when the player sends Ready (via HandleAllPlayersReady),
+        // not on connection — since the client may connect early for data loading.
     }
 
     public void Update(float deltaTime)
     {
         _currentTick++;
+
+        // Process pending actions from async operations (must run on game loop thread)
+        while (_pendingActions.TryDequeue(out var action))
+        {
+            action();
+        }
 
         // Skip game logic updates when paused
         if (_isPaused)
@@ -154,7 +163,7 @@ public sealed class GameSession
         _isPaused = paused;
         _pauseReason = reason;
 
-        _server.Broadcast(new GamePausePacket
+        _broadcast(new GamePausePacket
         {
             IsPaused = paused,
             Reason = reason
@@ -180,7 +189,7 @@ public sealed class GameSession
 
         player.LastProcessedInputSequence = packet.InputSequence;
 
-        _server.Send(peerId, new PlayerInputAckPacket
+        _send(peerId, new PlayerInputAckPacket
         {
             LastProcessedSequence = packet.InputSequence
         });
@@ -193,9 +202,8 @@ public sealed class GameSession
 
         var baseStats = TowerDefinitions.GetStats(packet.TowerType);
 
-        // Calculate dynamic cost based on purchase count for this tower type
-        var purchaseKey = (player.UserId, packet.TowerType);
-        var purchaseCount = _towerPurchaseCounts.GetValueOrDefault(purchaseKey, 0);
+        // Calculate dynamic cost based on purchase count for this player tower
+        var purchaseCount = _towerPurchaseCounts.GetValueOrDefault(packet.PlayerTowerId, 0);
         var dynamicCost = TowerCostCalculator.CalculateCost(packet.TowerType, purchaseCount);
 
         if (player.Gold < dynamicCost)
@@ -212,57 +220,62 @@ public sealed class GameSession
 
         _playerManager.ModifyGold(player.PlayerId, -dynamicCost);
 
-        // Increment purchase count for this tower type
-        _towerPurchaseCounts[purchaseKey] = purchaseCount + 1;
+        // Increment purchase count for this player tower
+        _towerPurchaseCounts[packet.PlayerTowerId] = purchaseCount + 1;
 
-        // Fetch player bonuses for this tower type
-        var bonuses = await _towerBonusService.GetBonusesAsync(player.UserId, packet.TowerType);
-        var weaponStyle = await _towerBonusService.GetWeaponAttackStyleAsync(player.UserId, packet.TowerType);
+        // Fetch player bonuses for this tower (may be async with real service)
+        var bonuses = await _towerBonusService.GetBonusesAsync(packet.PlayerTowerId);
+        var weaponStyle = await _towerBonusService.GetWeaponAttackStyleAsync(packet.PlayerTowerId);
 
-        // Apply bonuses to stats
-        var modifiedStats = ApplyBonusesToStats(baseStats, bonuses, weaponStyle);
-
-        var tower = new Tower
+        // Queue tower creation and broadcast to run on the game loop thread,
+        // since the await above may resume on a threadpool thread and ENet is not thread-safe.
+        _pendingActions.Enqueue(() =>
         {
-            EntityId = ++_nextEntityId,
-            Type = packet.TowerType,
-            OwnerId = player.PlayerId,
-            OwnerUserId = player.UserId,
-            GridX = packet.GridX,
-            GridY = packet.GridY,
-            X = packet.GridX * GameConstants.GridCellSize + GameConstants.GridCellSize / 2f,
-            Y = packet.GridY * GameConstants.GridCellSize + GameConstants.GridCellSize / 2f,
-            Health = (int)(100 + bonuses.TowerHpFlat + 100 * bonuses.TowerHpPercent / 100),
-            MaxHealth = (int)(100 + bonuses.TowerHpFlat + 100 * bonuses.TowerHpPercent / 100),
-            Stats = modifiedStats,
-            Bonuses = bonuses,
-            WeaponStyle = weaponStyle,
-            CritChance = bonuses.CritChance,
-            CritMultiplier = 150 + bonuses.CritMultiplier // Base 150% crit damage
-        };
+            var modifiedStats = ApplyBonusesToStats(baseStats, bonuses, weaponStyle);
 
-        lock (_entitiesLock)
-        {
-            _towers[tower.EntityId] = tower;
-        }
+            var tower = new Tower
+            {
+                EntityId = ++_nextEntityId,
+                Type = packet.TowerType,
+                PlayerTowerId = packet.PlayerTowerId,
+                OwnerId = player.PlayerId,
+                OwnerUserId = player.UserId,
+                GridX = packet.GridX,
+                GridY = packet.GridY,
+                X = packet.GridX * GameConstants.GridCellSize + GameConstants.GridCellSize / 2f,
+                Y = packet.GridY * GameConstants.GridCellSize + GameConstants.GridCellSize / 2f,
+                Health = (int)(100 + bonuses.TowerHpFlat + 100 * bonuses.TowerHpPercent / 100),
+                MaxHealth = (int)(100 + bonuses.TowerHpFlat + 100 * bonuses.TowerHpPercent / 100),
+                Stats = modifiedStats,
+                Bonuses = bonuses,
+                WeaponStyle = weaponStyle,
+                CritChance = bonuses.CritChance,
+                CritMultiplier = 150 + bonuses.CritMultiplier // Base 150% crit damage
+            };
 
-        BroadcastEntitySpawn(tower);
+            lock (_entitiesLock)
+            {
+                _towers[tower.EntityId] = tower;
+            }
 
-        _eventPublisher.PublishAsync(new
-        {
-            EventType = "tower.built",
-            MatchId = _matchId,
-            PlayerId = player.UserId,
-            TowerId = tower.EntityId,
-            TowerType = (byte)packet.TowerType,
-            packet.GridX,
-            packet.GridY,
-            GoldSpent = dynamicCost,
-            Timestamp = DateTime.UtcNow
+            BroadcastEntitySpawn(tower);
+
+            _eventPublisher.PublishAsync(new
+            {
+                EventType = "tower.built",
+                MatchId = _matchId,
+                PlayerId = player.UserId,
+                TowerId = tower.EntityId,
+                TowerType = (byte)packet.TowerType,
+                packet.GridX,
+                packet.GridY,
+                GoldSpent = dynamicCost,
+                Timestamp = DateTime.UtcNow
+            });
+
+            _logger.LogDebug("Player {PlayerId} built tower {TowerId} at ({X}, {Y}) with {DamageBonus}% damage bonus",
+                player.PlayerId, tower.EntityId, packet.GridX, packet.GridY, bonuses.DamagePercent);
         });
-
-        _logger.LogDebug("Player {PlayerId} built tower {TowerId} at ({X}, {Y}) with {DamageBonus}% damage bonus",
-            player.PlayerId, tower.EntityId, packet.GridX, packet.GridY, bonuses.DamagePercent);
     }
 
     private TowerStats ApplyBonusesToStats(TowerStats baseStats, TowerBonusSummaryDto bonuses, WeaponAttackStyleDto? weapon)
@@ -406,7 +419,7 @@ public sealed class GameSession
         {
             if (!_itemDrops.TryGetValue(packet.DropId, out var drop))
             {
-                _server.Send(peerId, new ItemCollectAckPacket
+                _send(peerId, new ItemCollectAckPacket
                 {
                     RequestId = packet.RequestId,
                     Success = false,
@@ -418,7 +431,7 @@ public sealed class GameSession
 
             if (drop.IsCollected)
             {
-                _server.Send(peerId, new ItemCollectAckPacket
+                _send(peerId, new ItemCollectAckPacket
                 {
                     RequestId = packet.RequestId,
                     Success = false,
@@ -431,7 +444,7 @@ public sealed class GameSession
             // Verify ownership - only the owner can collect
             if (drop.OwnerId != player.PlayerId)
             {
-                _server.Send(peerId, new ItemCollectAckPacket
+                _send(peerId, new ItemCollectAckPacket
                 {
                     RequestId = packet.RequestId,
                     Success = false,
@@ -460,7 +473,7 @@ public sealed class GameSession
             });
 
             // Send success ACK to collecting player
-            _server.Send(peerId, new ItemCollectAckPacket
+            _send(peerId, new ItemCollectAckPacket
             {
                 RequestId = packet.RequestId,
                 Success = true,
@@ -597,7 +610,7 @@ public sealed class GameSession
 
     private void BroadcastItemDrop(ServerItemDrop drop)
     {
-        _server.Broadcast(new ItemDropPacket
+        _broadcast(new ItemDropPacket
         {
             DropId = drop.DropId,
             X = drop.X,
@@ -614,7 +627,7 @@ public sealed class GameSession
     {
         var players = _playerManager.GetAllPlayers();
 
-        _server.Broadcast(new MatchStartPacket
+        _broadcast(new MatchStartPacket
         {
             MatchId = _matchId,
             Mode = mode,
@@ -650,7 +663,7 @@ public sealed class GameSession
 
         var waveInfo = GenerateWaveInfo(_currentWave);
 
-        _server.Broadcast(new WaveStartPacket
+        _broadcast(new WaveStartPacket
         {
             WaveNumber = (uint)_currentWave,
             WaveInfo = waveInfo
@@ -668,7 +681,7 @@ public sealed class GameSession
             var map = GenerateDefaultMap();
             StartMatch(GameMode.Solo, map);
 
-            Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => StartWave());
+            _waveStartDelay = 5f;
         }
         else if (_state == GameState.Preparation)
         {
@@ -854,7 +867,7 @@ public sealed class GameSession
                 xpAmount = (int)(xpAmount * (1 + tower.Bonuses.XpGainPercent / 100));
             }
 
-            AccumulateTowerXp(tower.OwnerUserId, tower.Type, xpAmount);
+            AccumulateTowerXp(tower.PlayerTowerId, xpAmount);
 
             BroadcastEntityDestroy(unit.EntityId, DestroyReason.Killed);
 
@@ -878,13 +891,12 @@ public sealed class GameSession
         }
     }
 
-    private void AccumulateTowerXp(Guid userId, TowerType towerType, int xpAmount)
+    private void AccumulateTowerXp(Guid playerTowerId, int xpAmount)
     {
-        var key = (userId, towerType);
-        if (_towerXpAccumulated.ContainsKey(key))
-            _towerXpAccumulated[key] += xpAmount;
+        if (_towerXpAccumulated.ContainsKey(playerTowerId))
+            _towerXpAccumulated[playerTowerId] += xpAmount;
         else
-            _towerXpAccumulated[key] = xpAmount;
+            _towerXpAccumulated[playerTowerId] = xpAmount;
     }
 
     private IEnumerable<Unit> FindUnitsInRange(float x, float y, float range)
@@ -944,20 +956,20 @@ public sealed class GameSession
                 {
                     _playerManager.ModifyGold(player.PlayerId, GameConstants.WaveCompletionBonus);
 
-                    // Award wave clear XP to all tower types the player has
-                    var playerTowerTypes = _towers.Values
+                    // Award wave clear XP to all player towers the player has placed
+                    var playerTowerIds = _towers.Values
                         .Where(t => t.OwnerUserId == player.UserId)
-                        .Select(t => t.Type)
+                        .Select(t => t.PlayerTowerId)
                         .Distinct();
 
-                    foreach (var towerType in playerTowerTypes)
+                    foreach (var playerTowerId in playerTowerIds)
                     {
                         var xpAmount = TowerProgressionConstants.XpSources.WaveClear;
                         if (isPerfectWave)
                         {
                             xpAmount += TowerProgressionConstants.XpSources.PerfectWave;
                         }
-                        AccumulateTowerXp(player.UserId, towerType, xpAmount);
+                        AccumulateTowerXp(playerTowerId, xpAmount);
                     }
 
                     // Check for item drops
@@ -967,7 +979,7 @@ public sealed class GameSession
                 // Publish accumulated XP
                 PublishAccumulatedXp();
 
-                _server.Broadcast(new WaveEndPacket
+                _broadcast(new WaveEndPacket
                 {
                     WaveNumber = (uint)_currentWave,
                     Success = true,
@@ -1055,8 +1067,7 @@ public sealed class GameSession
                 {
                     EventType = "tower.xp_gained",
                     MatchId = _matchId,
-                    PlayerId = kvp.Key.PlayerId,
-                    TowerType = (byte)kvp.Key.TowerType,
+                    TowerId = kvp.Key,
                     XpAmount = kvp.Value,
                     Source = "accumulated",
                     Timestamp = DateTime.UtcNow
@@ -1093,19 +1104,19 @@ public sealed class GameSession
         // Award end-of-match XP and item drops
         foreach (var player in players)
         {
-            var playerTowerTypes = _towers.Values
+            var playerTowerIds = _towers.Values
                 .Where(t => t.OwnerUserId == player.UserId)
-                .Select(t => t.Type)
+                .Select(t => t.PlayerTowerId)
                 .Distinct();
 
-            foreach (var towerType in playerTowerTypes)
+            foreach (var playerTowerId in playerTowerIds)
             {
                 var xpAmount = TowerProgressionConstants.XpSources.MatchComplete;
                 if (result == MatchResult.Victory)
                 {
                     xpAmount += TowerProgressionConstants.XpSources.Victory;
                 }
-                AccumulateTowerXp(player.UserId, towerType, xpAmount);
+                AccumulateTowerXp(playerTowerId, xpAmount);
             }
 
             // End-of-match item drops
@@ -1115,7 +1126,7 @@ public sealed class GameSession
         // Publish accumulated XP
         PublishAccumulatedXp();
 
-        _server.Broadcast(new MatchEndPacket
+        _broadcast(new MatchEndPacket
         {
             MatchId = _matchId,
             Result = result,
@@ -1133,6 +1144,18 @@ public sealed class GameSession
         });
 
         _logger.LogInformation("Match {MatchId} ended: {Result}, waves: {Waves}", _matchId, result, _currentWave);
+
+        OnSessionEnded?.Invoke(this);
+    }
+
+    public void ForceEnd()
+    {
+        if (_state != GameState.GameOver)
+        {
+            _state = GameState.GameOver;
+            _logger.LogInformation("Session {MatchId} force-ended", _matchId);
+            OnSessionEnded?.Invoke(this);
+        }
     }
 
     private void ProcessMatchEndDrops(Guid userId, MatchResult result)
@@ -1329,7 +1352,7 @@ public sealed class GameSession
 
     private void BroadcastEntitySpawn(Tower tower)
     {
-        _server.Broadcast(new EntitySpawnPacket
+        _broadcast(new EntitySpawnPacket
         {
             Tick = _currentTick,
             Entity = new EntityState
@@ -1356,7 +1379,7 @@ public sealed class GameSession
         var modifierBytes = BitConverter.GetBytes((uint)unit.Modifiers);
         Array.Copy(modifierBytes, 0, extraData, 2, 4);
 
-        _server.Broadcast(new EntitySpawnPacket
+        _broadcast(new EntitySpawnPacket
         {
             Tick = _currentTick,
             Entity = new EntityState
@@ -1375,7 +1398,7 @@ public sealed class GameSession
 
     private void BroadcastEntityDestroy(uint entityId, DestroyReason reason)
     {
-        _server.Broadcast(new EntityDestroyPacket
+        _broadcast(new EntityDestroyPacket
         {
             Tick = _currentTick,
             EntityId = entityId,
@@ -1404,17 +1427,17 @@ public sealed class GameSession
 
         if (deltas.Count > 0)
         {
-            _server.Broadcast(new EntityUpdatePacket
+            _broadcast(new EntityUpdatePacket
             {
                 Tick = _currentTick,
                 Deltas = deltas.ToArray()
-            }, ENet.PacketFlags.None);
+            });
         }
     }
 
     private void SendError(uint peerId, ErrorCode code, string message, uint? requestId = null)
     {
-        _server.Send(peerId, new ErrorPacket
+        _send(peerId, new ErrorPacket
         {
             Code = code,
             Message = message,
@@ -1435,6 +1458,7 @@ public sealed class Tower
 {
     public uint EntityId { get; init; }
     public TowerType Type { get; init; }
+    public Guid PlayerTowerId { get; init; }
     public uint OwnerId { get; init; }
     public Guid OwnerUserId { get; init; }
     public int GridX { get; init; }

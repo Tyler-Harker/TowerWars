@@ -10,12 +10,12 @@ namespace TowerWars.Auth.Services;
 public interface IEquipmentService
 {
     Task<PlayerInventoryResponse> GetInventoryAsync(Guid userId, int page = 1, int pageSize = 50);
-    Task<TowerEquipmentDto?> GetTowerEquipmentAsync(Guid userId, byte towerType);
+    Task<TowerEquipmentDto?> GetTowerEquipmentAsync(Guid towerId);
     Task<EquipItemResponse> EquipItemAsync(Guid userId, EquipItemRequest request);
     Task<UnequipItemResponse> UnequipItemAsync(Guid userId, UnequipItemRequest request);
     Task<DeleteItemResponse> DeleteItemAsync(Guid userId, DeleteItemRequest request);
     Task<ItemDto?> GenerateItemAsync(GenerateItemRequest request);
-    Task<TowerBonusSummaryDto> GetEquipmentBonusesAsync(Guid userId, byte towerType);
+    Task<TowerBonusSummaryDto> GetEquipmentBonusesAsync(Guid towerId);
 }
 
 public class EquipmentService : IEquipmentService
@@ -56,10 +56,10 @@ public class EquipmentService : IEquipmentService
         );
     }
 
-    public async Task<TowerEquipmentDto?> GetTowerEquipmentAsync(Guid userId, byte towerType)
+    public async Task<TowerEquipmentDto?> GetTowerEquipmentAsync(Guid towerId)
     {
         var tower = await _db.PlayerTowers
-            .Where(pt => pt.UserId == userId && pt.TowerType == (TowerType)towerType)
+            .Where(pt => pt.Id == towerId)
             .Include(pt => pt.Equipment)
                 .ThenInclude(e => e.Item)
                     .ThenInclude(i => i!.ItemBase)
@@ -79,7 +79,6 @@ public class EquipmentService : IEquipmentService
 
         return new TowerEquipmentDto(
             tower.Id,
-            towerType,
             equipment,
             CalculateEquipmentBonuses(tower.Equipment)
         );
@@ -104,9 +103,6 @@ public class EquipmentService : IEquipmentService
 
         if (tower == null)
             return new EquipItemResponse(false, "Tower not found", null, null);
-
-        if (!tower.Unlocked)
-            return new EquipItemResponse(false, "Tower is not unlocked", null, null);
 
         if (item.ItemBase!.RequiredTowerLevel > tower.Level)
             return new EquipItemResponse(false, $"Tower level {item.ItemBase.RequiredTowerLevel} required", null, null);
@@ -245,10 +241,10 @@ public class EquipmentService : IEquipmentService
         return ToItemDto(item, affixes);
     }
 
-    public async Task<TowerBonusSummaryDto> GetEquipmentBonusesAsync(Guid userId, byte towerType)
+    public async Task<TowerBonusSummaryDto> GetEquipmentBonusesAsync(Guid towerId)
     {
         var tower = await _db.PlayerTowers
-            .Where(pt => pt.UserId == userId && pt.TowerType == (TowerType)towerType)
+            .Where(pt => pt.Id == towerId)
             .Include(pt => pt.Equipment)
                 .ThenInclude(e => e.Item)
                     .ThenInclude(i => i!.ItemBase)

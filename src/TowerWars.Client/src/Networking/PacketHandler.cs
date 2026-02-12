@@ -1,3 +1,4 @@
+using System;
 using Godot;
 using TowerWars.Shared.Protocol;
 
@@ -5,6 +6,18 @@ namespace TowerWars.Client.Networking;
 
 public partial class PacketHandler : Node
 {
+    // C# events for complex data (Godot signals can't pass complex objects like byte[])
+    public event Action<PlayerTowersResponsePacket>? PlayerTowersReceived;
+    public event Action<PlayerItemsResponsePacket>? PlayerItemsReceived;
+    public event Action<RequestMatchAckPacket>? RequestMatchAckReceived;
+    public event Action? ReturnedToLobby;
+
+    // Entity events use C# events because EntitySpawned passes byte[] ExtraData
+    // which doesn't marshal correctly through Godot's Variant-based signal system
+    public event Action<uint, int, float, float, byte[]>? EntitySpawned;
+    public event Action<uint>? EntityDestroyed;
+    public event Action<uint, float, float, int>? EntityUpdated;
+
     [Signal]
     public delegate void MatchStartedEventHandler(string matchId);
 
@@ -16,15 +29,6 @@ public partial class PacketHandler : Node
 
     [Signal]
     public delegate void WaveEndedEventHandler(int waveNumber, bool success, int bonusGold);
-
-    [Signal]
-    public delegate void EntitySpawnedEventHandler(uint entityId, int entityType, float x, float y, byte[] extraData);
-
-    [Signal]
-    public delegate void EntityDestroyedEventHandler(uint entityId);
-
-    [Signal]
-    public delegate void EntityUpdatedEventHandler(uint entityId, float x, float y, int health);
 
     [Signal]
     public delegate void PlayerStateUpdatedEventHandler(uint playerId, int gold, int lives, int score);
@@ -110,6 +114,29 @@ public partial class PacketHandler : Node
             case PacketType.GamePause:
                 HandleGamePause(PacketSerializer.Deserialize<GamePausePacket>(payloadMemory));
                 break;
+
+            case PacketType.PlayerTowersResponse:
+                var towersResponse = PacketSerializer.Deserialize<PlayerTowersResponsePacket>(payloadMemory);
+                GD.Print($"Received {towersResponse.Towers.Length} towers from server");
+                PlayerTowersReceived?.Invoke(towersResponse);
+                break;
+
+            case PacketType.PlayerItemsResponse:
+                var itemsResponse = PacketSerializer.Deserialize<PlayerItemsResponsePacket>(payloadMemory);
+                GD.Print($"Received {itemsResponse.Items.Length} items from server");
+                PlayerItemsReceived?.Invoke(itemsResponse);
+                break;
+
+            case PacketType.RequestMatchAck:
+                var matchAck = PacketSerializer.Deserialize<RequestMatchAckPacket>(payloadMemory);
+                GD.Print($"Match request ack: success={matchAck.Success}, matchId={matchAck.MatchId}");
+                RequestMatchAckReceived?.Invoke(matchAck);
+                break;
+
+            case PacketType.ReturnToLobby:
+                GD.Print("Returned to lobby");
+                ReturnedToLobby?.Invoke();
+                break;
         }
     }
 
@@ -139,7 +166,8 @@ public partial class PacketHandler : Node
 
     private void HandleEntitySpawn(EntitySpawnPacket packet)
     {
-        EmitSignal(SignalName.EntitySpawned,
+        GD.Print($"Entity spawned: id={packet.Entity.EntityId}, type={packet.Entity.Type}, pos=({packet.Entity.X}, {packet.Entity.Y})");
+        EntitySpawned?.Invoke(
             packet.Entity.EntityId,
             (int)packet.Entity.Type,
             packet.Entity.X,
@@ -149,7 +177,7 @@ public partial class PacketHandler : Node
 
     private void HandleEntityDestroy(EntityDestroyPacket packet)
     {
-        EmitSignal(SignalName.EntityDestroyed, packet.EntityId);
+        EntityDestroyed?.Invoke(packet.EntityId);
     }
 
     private void HandleEntityUpdate(EntityUpdatePacket packet)
@@ -158,7 +186,7 @@ public partial class PacketHandler : Node
         {
             if (delta.Flags.HasFlag(DeltaFlags.Position) || delta.Flags.HasFlag(DeltaFlags.Health))
             {
-                EmitSignal(SignalName.EntityUpdated,
+                EntityUpdated?.Invoke(
                     delta.EntityId,
                     delta.X ?? 0,
                     delta.Y ?? 0,

@@ -70,11 +70,8 @@ public class PlayerTower
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
-    public TowerType TowerType { get; set; }
     public long Experience { get; set; }
     public int Level { get; set; } = 1;
-    public bool Unlocked { get; set; }
-    public DateTime? UnlockedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -86,7 +83,6 @@ public class PlayerTower
 public class TowerSkillNode
 {
     public Guid Id { get; set; }
-    public TowerType TowerType { get; set; }
     public required string NodeId { get; set; }
     public short Tier { get; set; }
     public short PositionX { get; set; }

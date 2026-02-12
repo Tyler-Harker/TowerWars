@@ -1,69 +1,109 @@
 using Microsoft.Extensions.Logging;
 using TowerWars.Shared.Protocol;
 using TowerWars.ZoneServer.Game;
+using TowerWars.ZoneServer.Services;
 
 namespace TowerWars.ZoneServer.Networking;
 
 public class PacketRouter
 {
     private readonly ILogger<PacketRouter> _logger;
-    private readonly GameSession _gameSession;
-    private readonly PlayerManager _playerManager;
+    private readonly ConnectionManager _connectionManager;
+    private readonly GameSessionManager _sessionManager;
+    private readonly IPlayerDataService _playerDataService;
+    private readonly Lazy<ENetServer> _serverLazy;
+    private ENetServer _server => _serverLazy.Value;
 
     public PacketRouter(
         ILogger<PacketRouter> logger,
-        GameSession gameSession,
-        PlayerManager playerManager)
+        ConnectionManager connectionManager,
+        GameSessionManager sessionManager,
+        IPlayerDataService playerDataService,
+        Lazy<ENetServer> server)
     {
         _logger = logger;
-        _gameSession = gameSession;
-        _playerManager = playerManager;
+        _connectionManager = connectionManager;
+        _sessionManager = sessionManager;
+        _playerDataService = playerDataService;
+        _serverLazy = server;
     }
 
     public void Route(uint peerId, PacketType type, ReadOnlyMemory<byte> payload)
     {
+        // Connection-level packets — always handled regardless of state
         switch (type)
         {
             case PacketType.Connect:
                 HandleConnect(peerId, PacketSerializer.Deserialize<ConnectPacket>(payload));
-                break;
-
+                return;
             case PacketType.Ping:
-                HandlePing(peerId, PacketSerializer.Deserialize<PingPacket>(payload));
-                break;
+                _connectionManager.HandlePing(peerId, PacketSerializer.Deserialize<PingPacket>(payload).ClientTime);
+                return;
+        }
 
+        // Everything else requires authentication
+        var peer = _connectionManager.GetPeer(peerId);
+        if (peer == null || peer.State == PeerState.Unauthenticated)
+        {
+            _logger.LogWarning("Packet {Type} from unauthenticated peer {PeerId}", type, peerId);
+            return;
+        }
+
+        // Lobby-level packets — authenticated but not necessarily in a game
+        switch (type)
+        {
+            case PacketType.PlayerDataRequest:
+                HandlePlayerDataRequest(peerId, peer);
+                return;
+            case PacketType.RequestMatch:
+                _sessionManager.HandleRequestMatch(peerId,
+                    PacketSerializer.Deserialize<RequestMatchPacket>(payload));
+                return;
+        }
+
+        // Game-level packets — peer must be in a game session
+        if (peer.State != PeerState.InGame)
+        {
+            _logger.LogWarning("Game packet {Type} from non-game peer {PeerId} (state: {State})",
+                type, peerId, peer.State);
+            return;
+        }
+
+        var session = _sessionManager.GetSessionForPeer(peerId);
+        if (session == null)
+        {
+            _logger.LogWarning("No session found for in-game peer {PeerId}", peerId);
+            return;
+        }
+
+        switch (type)
+        {
             case PacketType.PlayerInput:
-                HandlePlayerInput(peerId, PacketSerializer.Deserialize<PlayerInputPacket>(payload));
+                session.ProcessInput(peerId, PacketSerializer.Deserialize<PlayerInputPacket>(payload));
                 break;
-
             case PacketType.TowerBuild:
-                HandleTowerBuild(peerId, PacketSerializer.Deserialize<TowerBuildPacket>(payload));
+                session.ProcessTowerBuild(peerId, PacketSerializer.Deserialize<TowerBuildPacket>(payload));
                 break;
-
             case PacketType.TowerUpgrade:
-                HandleTowerUpgrade(peerId, PacketSerializer.Deserialize<TowerUpgradePacket>(payload));
+                session.ProcessTowerUpgrade(peerId, PacketSerializer.Deserialize<TowerUpgradePacket>(payload));
                 break;
-
             case PacketType.TowerSell:
-                HandleTowerSell(peerId, PacketSerializer.Deserialize<TowerSellPacket>(payload));
+                session.ProcessTowerSell(peerId, PacketSerializer.Deserialize<TowerSellPacket>(payload));
                 break;
-
             case PacketType.AbilityUse:
-                HandleAbilityUse(peerId, PacketSerializer.Deserialize<AbilityUsePacket>(payload));
+                session.ProcessAbilityUse(peerId, PacketSerializer.Deserialize<AbilityUsePacket>(payload));
                 break;
-
             case PacketType.ReadyState:
-                HandleReadyState(peerId, PacketSerializer.Deserialize<ReadyStatePacket>(payload));
+                session.PlayerManager.SetReady(peerId,
+                    PacketSerializer.Deserialize<ReadyStatePacket>(payload).IsReady);
                 break;
-
             case PacketType.ChatMessage:
-                HandleChatMessage(peerId, PacketSerializer.Deserialize<ChatMessagePacket>(payload));
+                session.PlayerManager.BroadcastChat(peerId,
+                    PacketSerializer.Deserialize<ChatMessagePacket>(payload));
                 break;
-
             case PacketType.ItemCollect:
-                HandleItemCollect(peerId, PacketSerializer.Deserialize<ItemCollectPacket>(payload));
+                session.ProcessItemCollect(peerId, PacketSerializer.Deserialize<ItemCollectPacket>(payload));
                 break;
-
             default:
                 _logger.LogWarning("Unhandled packet type {Type} from peer {PeerId}", type, peerId);
                 break;
@@ -79,51 +119,47 @@ public class PacketRouter
             return;
         }
 
-        _playerManager.HandleConnectionRequest(peerId, packet.ConnectionToken);
+        _connectionManager.HandleConnectionRequest(peerId, packet.ConnectionToken);
     }
 
-    private void HandlePing(uint peerId, PingPacket packet)
+    private async void HandlePlayerDataRequest(uint peerId, ConnectedPeerInfo peer)
     {
-        _playerManager.HandlePing(peerId, packet.ClientTime);
-    }
+        try
+        {
+            var (towers, items) = await _playerDataService.GetPlayerDataAsync(peer.UserId);
 
-    private void HandlePlayerInput(uint peerId, PlayerInputPacket packet)
-    {
-        _gameSession.ProcessInput(peerId, packet);
-    }
+            _server.Send(peerId, new PlayerTowersResponsePacket
+            {
+                Success = true,
+                Towers = towers
+            });
 
-    private void HandleTowerBuild(uint peerId, TowerBuildPacket packet)
-    {
-        _gameSession.ProcessTowerBuild(peerId, packet);
-    }
+            _server.Send(peerId, new PlayerItemsResponsePacket
+            {
+                Success = true,
+                Items = items
+            });
 
-    private void HandleTowerUpgrade(uint peerId, TowerUpgradePacket packet)
-    {
-        _gameSession.ProcessTowerUpgrade(peerId, packet);
-    }
+            _logger.LogDebug("Sent player data to peer {PeerId}: {TowerCount} towers, {ItemCount} items",
+                peerId, towers.Length, items.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load player data for {UserId}", peer.UserId);
 
-    private void HandleTowerSell(uint peerId, TowerSellPacket packet)
-    {
-        _gameSession.ProcessTowerSell(peerId, packet);
-    }
+            _server.Send(peerId, new PlayerTowersResponsePacket
+            {
+                Success = false,
+                ErrorMessage = "Failed to load player data",
+                Towers = []
+            });
 
-    private void HandleAbilityUse(uint peerId, AbilityUsePacket packet)
-    {
-        _gameSession.ProcessAbilityUse(peerId, packet);
-    }
-
-    private void HandleReadyState(uint peerId, ReadyStatePacket packet)
-    {
-        _playerManager.SetReady(peerId, packet.IsReady);
-    }
-
-    private void HandleChatMessage(uint peerId, ChatMessagePacket packet)
-    {
-        _playerManager.BroadcastChat(peerId, packet);
-    }
-
-    private void HandleItemCollect(uint peerId, ItemCollectPacket packet)
-    {
-        _gameSession.ProcessItemCollect(peerId, packet);
+            _server.Send(peerId, new PlayerItemsResponsePacket
+            {
+                Success = false,
+                ErrorMessage = "Failed to load player data",
+                Items = []
+            });
+        }
     }
 }

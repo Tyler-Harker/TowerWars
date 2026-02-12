@@ -18,6 +18,19 @@ public static class PacketSerializer
         return result;
     }
 
+    /// <summary>
+    /// Non-generic overload that serializes using the runtime type.
+    /// Used when the packet is only known as IPacket (e.g. delegate-based send/broadcast).
+    /// </summary>
+    public static byte[] Serialize(IPacket packet)
+    {
+        var payload = MessagePackSerializer.Serialize(packet.GetType(), packet, Options);
+        var result = new byte[payload.Length + 1];
+        result[0] = (byte)packet.Type;
+        Buffer.BlockCopy(payload, 0, result, 1, payload.Length);
+        return result;
+    }
+
     public static (PacketType Type, ReadOnlyMemory<byte> Payload) Peek(ReadOnlySpan<byte> data)
     {
         if (data.Length < 1)
@@ -60,6 +73,12 @@ public static class PacketSerializer
             PacketType.ChatMessage => MessagePackSerializer.Deserialize<ChatMessagePacket>(payload, Options),
             PacketType.ChatBroadcast => MessagePackSerializer.Deserialize<ChatBroadcastPacket>(payload, Options),
             PacketType.Error => MessagePackSerializer.Deserialize<ErrorPacket>(payload, Options),
+            PacketType.PlayerDataRequest => MessagePackSerializer.Deserialize<PlayerDataRequestPacket>(payload, Options),
+            PacketType.PlayerTowersResponse => MessagePackSerializer.Deserialize<PlayerTowersResponsePacket>(payload, Options),
+            PacketType.PlayerItemsResponse => MessagePackSerializer.Deserialize<PlayerItemsResponsePacket>(payload, Options),
+            PacketType.RequestMatch => MessagePackSerializer.Deserialize<RequestMatchPacket>(payload, Options),
+            PacketType.RequestMatchAck => MessagePackSerializer.Deserialize<RequestMatchAckPacket>(payload, Options),
+            PacketType.ReturnToLobby => MessagePackSerializer.Deserialize<ReturnToLobbyPacket>(payload, Options),
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown packet type")
         };
     }

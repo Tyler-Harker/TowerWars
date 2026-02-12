@@ -175,18 +175,14 @@ CREATE INDEX idx_audit_log_occurred_at ON audit_log(occurred_at DESC);
 -- Add inventory slots to users
 ALTER TABLE users ADD COLUMN inventory_slots INTEGER DEFAULT 50;
 
--- Player tower progression (one per tower type per user)
+-- Player tower progression
 CREATE TABLE player_towers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    tower_type SMALLINT NOT NULL,
     experience BIGINT DEFAULT 0,
     level INTEGER DEFAULT 1,
-    unlocked BOOLEAN DEFAULT FALSE,
-    unlocked_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(user_id, tower_type)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX idx_player_towers_user_id ON player_towers(user_id);
@@ -194,8 +190,7 @@ CREATE INDEX idx_player_towers_user_id ON player_towers(user_id);
 -- Skill tree node definitions (static, seeded)
 CREATE TABLE tower_skill_nodes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tower_type SMALLINT NOT NULL,
-    node_id VARCHAR(32) NOT NULL,
+    node_id VARCHAR(32) NOT NULL UNIQUE,
     tier SMALLINT NOT NULL,
     position_x SMALLINT NOT NULL,
     position_y SMALLINT NOT NULL,
@@ -207,11 +202,8 @@ CREATE TABLE tower_skill_nodes (
     bonus_value DECIMAL(10, 4) NOT NULL,
     bonus_value_per_rank DECIMAL(10, 4) DEFAULT 0,
     max_ranks SMALLINT DEFAULT 1,
-    prerequisite_node_ids TEXT[],
-    UNIQUE(tower_type, node_id)
+    prerequisite_node_ids TEXT[]
 );
-
-CREATE INDEX idx_tower_skill_nodes_tower_type ON tower_skill_nodes(tower_type);
 
 -- Player's allocated skill points
 CREATE TABLE player_tower_skills (

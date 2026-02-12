@@ -41,27 +41,19 @@ public enum TowerBonusType
 
 public sealed record PlayerTowerDto(
     Guid Id,
-    byte TowerType,
-    string TowerName,
     long Experience,
     int Level,
-    int AvailableSkillPoints,
-    bool Unlocked,
-    DateTime? UnlockedAt
+    int AvailableSkillPoints
 );
 
 public sealed record PlayerTowerDetailDto(
     Guid Id,
-    byte TowerType,
-    string TowerName,
     long Experience,
     long ExperienceToNextLevel,
     int Level,
     int MaxLevel,
     int AvailableSkillPoints,
     int TotalSkillPoints,
-    bool Unlocked,
-    DateTime? UnlockedAt,
     List<SkillNodeDto> SkillNodes,
     List<AllocatedSkillDto> AllocatedSkills,
     TowerBonusSummaryDto BonusSummary
@@ -117,16 +109,6 @@ public sealed record AllocateSkillResponse(
     string? Error,
     int RemainingSkillPoints,
     AllocatedSkillDto? AllocatedSkill
-);
-
-public sealed record TowerUnlockRequest(
-    byte TowerType
-);
-
-public sealed record TowerUnlockResponse(
-    bool Success,
-    string? Error,
-    PlayerTowerDto? UnlockedTower
 );
 
 public sealed record ResetSkillsRequest(

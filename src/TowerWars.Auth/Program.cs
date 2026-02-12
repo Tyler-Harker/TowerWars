@@ -199,20 +199,17 @@ app.MapGet("/api/towers", async (HttpContext ctx, ITowerProgressionService progr
     if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
         return Results.Unauthorized();
 
-    // Ensure new players have at least the basic tower
-    await progressionService.EnsureBasicTowerUnlockedAsync(userId);
-
     var result = await progressionService.GetPlayerTowersAsync(userId);
     return Results.Ok(result);
 }).RequireAuthorization();
 
-app.MapGet("/api/towers/{towerType:int}", async (int towerType, HttpContext ctx, ITowerProgressionService progressionService) =>
+app.MapGet("/api/towers/{towerId:guid}", async (Guid towerId, HttpContext ctx, ITowerProgressionService progressionService) =>
 {
     var userIdClaim = ctx.User.FindFirst("sub")?.Value;
-    if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
+    if (userIdClaim == null || !Guid.TryParse(userIdClaim, out _))
         return Results.Unauthorized();
 
-    var result = await progressionService.GetTowerDetailAsync(userId, (byte)towerType);
+    var result = await progressionService.GetTowerDetailAsync(towerId);
     return result != null ? Results.Ok(result) : Results.NotFound();
 }).RequireAuthorization();
 
@@ -236,16 +233,6 @@ app.MapPost("/api/towers/reset-skills", async (ResetSkillsRequest request, HttpC
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).RequireAuthorization();
 
-app.MapPost("/api/towers/unlock", async (TowerUnlockRequest request, HttpContext ctx, ITowerProgressionService progressionService) =>
-{
-    var userIdClaim = ctx.User.FindFirst("sub")?.Value;
-    if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
-        return Results.Unauthorized();
-
-    var result = await progressionService.UnlockTowerAsync(userId, request);
-    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-}).RequireAuthorization();
-
 // Equipment endpoints
 app.MapGet("/api/inventory", async (int page, int pageSize, HttpContext ctx, IEquipmentService equipmentService) =>
 {
@@ -260,13 +247,13 @@ app.MapGet("/api/inventory", async (int page, int pageSize, HttpContext ctx, IEq
     return Results.Ok(result);
 }).RequireAuthorization();
 
-app.MapGet("/api/towers/{towerType:int}/equipment", async (int towerType, HttpContext ctx, IEquipmentService equipmentService) =>
+app.MapGet("/api/towers/{towerId:guid}/equipment", async (Guid towerId, HttpContext ctx, IEquipmentService equipmentService) =>
 {
     var userIdClaim = ctx.User.FindFirst("sub")?.Value;
-    if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
+    if (userIdClaim == null || !Guid.TryParse(userIdClaim, out _))
         return Results.Unauthorized();
 
-    var result = await equipmentService.GetTowerEquipmentAsync(userId, (byte)towerType);
+    var result = await equipmentService.GetTowerEquipmentAsync(towerId);
     return result != null ? Results.Ok(result) : Results.NotFound();
 }).RequireAuthorization();
 
@@ -301,14 +288,13 @@ app.MapDelete("/api/inventory/{itemId:guid}", async (Guid itemId, HttpContext ct
 }).RequireAuthorization();
 
 // Internal endpoints for zone server
-app.MapGet("/internal/towers/{userId:guid}/{towerType:int}/bonuses", async (
-    Guid userId,
-    int towerType,
+app.MapGet("/internal/towers/{towerId:guid}/bonuses", async (
+    Guid towerId,
     ITowerProgressionService progressionService,
     IEquipmentService equipmentService) =>
 {
-    var skillBonuses = await progressionService.GetTowerBonusesAsync(userId, (byte)towerType);
-    var equipmentBonuses = await equipmentService.GetEquipmentBonusesAsync(userId, (byte)towerType);
+    var skillBonuses = await progressionService.GetTowerBonusesAsync(towerId);
+    var equipmentBonuses = await equipmentService.GetEquipmentBonusesAsync(towerId);
 
     // Merge bonuses
     var allBonuses = new Dictionary<TowerBonusType, decimal>(skillBonuses.AllBonuses);
@@ -336,12 +322,11 @@ app.MapGet("/internal/towers/{userId:guid}/{towerType:int}/bonuses", async (
     ));
 });
 
-app.MapGet("/internal/towers/{userId:guid}/{towerType:int}/equipment/weapon", async (
-    Guid userId,
-    int towerType,
+app.MapGet("/internal/towers/{towerId:guid}/equipment/weapon", async (
+    Guid towerId,
     IEquipmentService equipmentService) =>
 {
-    var equipment = await equipmentService.GetTowerEquipmentAsync(userId, (byte)towerType);
+    var equipment = await equipmentService.GetTowerEquipmentAsync(towerId);
     var weapon = equipment?.Equipment.FirstOrDefault(e => e.Slot == EquipmentSlot.Weapon)?.Item;
 
     if (weapon?.Base.WeaponSubtype == null)

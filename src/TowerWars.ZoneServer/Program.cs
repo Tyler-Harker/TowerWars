@@ -1,8 +1,10 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
+using TowerWars.Persistence.Data;
 using TowerWars.ZoneServer;
 using TowerWars.ZoneServer.Game;
 using TowerWars.ZoneServer.Networking;
@@ -73,10 +75,25 @@ else
     });
 }
 
+// Database - using IDbContextFactory because ZoneServer services are singletons
+var postgresConnectionString = builder.Configuration.GetConnectionString("Postgres");
+if (!string.IsNullOrEmpty(postgresConnectionString))
+{
+    builder.Services.AddDbContextFactory<PersistenceDbContext>(options =>
+    {
+        options.UseNpgsql(postgresConnectionString);
+    });
+    builder.Services.AddSingleton<IPlayerDataService, PlayerDataService>();
+}
+else
+{
+    builder.Services.AddSingleton<IPlayerDataService, NoOpPlayerDataService>();
+}
+
 builder.Services.AddSingleton<ENetServer>();
 builder.Services.AddSingleton<PacketRouter>();
-builder.Services.AddSingleton<PlayerManager>();
-builder.Services.AddSingleton<GameSession>();
+builder.Services.AddSingleton<ConnectionManager>();
+builder.Services.AddSingleton<GameSessionManager>();
 // Register Lazy<ENetServer> to break circular dependency
 builder.Services.AddSingleton(sp => new Lazy<ENetServer>(() => sp.GetRequiredService<ENetServer>()));
 builder.Services.AddHostedService<GameLoop>();

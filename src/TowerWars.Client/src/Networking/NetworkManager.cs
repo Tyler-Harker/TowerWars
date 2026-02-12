@@ -111,14 +111,15 @@ public partial class NetworkManager : Node
         });
     }
 
-    public void SendTowerBuild(TowerType towerType, int gridX, int gridY)
+    public void SendTowerBuild(TowerType towerType, int gridX, int gridY, Guid playerTowerId)
     {
         SendPacket(new TowerBuildPacket
         {
             RequestId = _lastInputSequence++,
             TowerType = towerType,
             GridX = gridX,
-            GridY = gridY
+            GridY = gridY,
+            PlayerTowerId = playerTowerId
         });
     }
 
@@ -154,6 +155,15 @@ public partial class NetworkManager : Node
         });
     }
 
+    public void SendRequestMatch(GameMode mode, byte tier)
+    {
+        SendPacket(new RequestMatchPacket
+        {
+            Mode = mode,
+            Tier = tier
+        });
+    }
+
     private void Poll()
     {
         while (_host.Service(0, out var netEvent) > 0)
@@ -180,13 +190,23 @@ public partial class NetworkManager : Node
         }
     }
 
+    public void SendPlayerDataRequest()
+    {
+        SendPacket(new PlayerDataRequestPacket());
+    }
+
     private void HandleConnect()
     {
         GD.Print("Connected to server, sending authentication...");
+        // Use auth token if available, fall back to connection token or test-token
+        var token = Autoloads.GameManager.Instance?.AuthToken
+            ?? Autoloads.GameManager.Instance?.ConnectionToken
+            ?? "test-token";
+
         // Send connect packet directly - bypass _connected check since we're authenticating
         var data = PacketSerializer.Serialize(new ConnectPacket
         {
-            ConnectionToken = "test-token",
+            ConnectionToken = token,
             ProtocolVersion = PacketSerializer.ProtocolVersion
         });
         var enetPacket = default(Packet);

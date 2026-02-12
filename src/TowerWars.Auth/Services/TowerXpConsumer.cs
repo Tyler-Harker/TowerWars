@@ -130,18 +130,16 @@ public sealed class TowerXpConsumer : BackgroundService
         JsonElement root,
         ITowerProgressionService progressionService)
     {
-        if (!root.TryGetProperty("PlayerId", out var playerIdProp)) return;
-        if (!root.TryGetProperty("TowerType", out var towerTypeProp)) return;
+        if (!root.TryGetProperty("TowerId", out var towerIdProp)) return;
         if (!root.TryGetProperty("XpAmount", out var xpAmountProp)) return;
 
-        var playerId = playerIdProp.GetGuid();
-        var towerType = towerTypeProp.GetByte();
+        var towerId = towerIdProp.GetGuid();
         var xpAmount = xpAmountProp.GetInt32();
 
-        _logger.LogDebug("Processing tower XP: Player={PlayerId}, Tower={TowerType}, XP={Xp}",
-            playerId, towerType, xpAmount);
+        _logger.LogDebug("Processing tower XP: TowerId={TowerId}, XP={Xp}",
+            towerId, xpAmount);
 
-        await progressionService.AddTowerXpAsync(playerId, towerType, xpAmount);
+        await progressionService.AddTowerXpAsync(towerId, xpAmount);
     }
 
     private async Task HandleItemDropped(

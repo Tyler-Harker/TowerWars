@@ -41,10 +41,18 @@ public enum PacketType : byte
     WaveEnd = 0x53,
     ReadyState = 0x54,
     GamePause = 0x55,
+    RequestMatch = 0x56,
+    RequestMatchAck = 0x57,
+    ReturnToLobby = 0x58,
 
     // Chat
     ChatMessage = 0x60,
     ChatBroadcast = 0x61,
+
+    // Player Data (persistent data via ENet)
+    PlayerDataRequest = 0x70,
+    PlayerTowersResponse = 0x71,
+    PlayerItemsResponse = 0x72,
 
     // Error
     Error = 0xFF

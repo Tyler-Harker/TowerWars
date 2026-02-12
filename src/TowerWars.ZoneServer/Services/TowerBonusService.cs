@@ -2,16 +2,15 @@ using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using TowerWars.Shared.Constants;
 using TowerWars.Shared.DTOs;
 
 namespace TowerWars.ZoneServer.Services;
 
 public interface ITowerBonusService
 {
-    Task<TowerBonusSummaryDto> GetBonusesAsync(Guid userId, TowerType towerType);
-    Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid userId, TowerType towerType);
-    void InvalidateCache(Guid userId);
+    Task<TowerBonusSummaryDto> GetBonusesAsync(Guid towerId);
+    Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid towerId);
+    void InvalidateCache(Guid towerId);
 }
 
 public class TowerBonusService : ITowerBonusService
@@ -20,8 +19,8 @@ public class TowerBonusService : ITowerBonusService
     private readonly ILogger<TowerBonusService> _logger;
     private readonly string _authServiceUrl;
 
-    private readonly ConcurrentDictionary<(Guid, TowerType), CachedBonus> _bonusCache = new();
-    private readonly ConcurrentDictionary<(Guid, TowerType), CachedWeapon> _weaponCache = new();
+    private readonly ConcurrentDictionary<Guid, CachedBonus> _bonusCache = new();
+    private readonly ConcurrentDictionary<Guid, CachedWeapon> _weaponCache = new();
 
     private static readonly TimeSpan CacheExpiry = TimeSpan.FromMinutes(5);
 
@@ -35,24 +34,22 @@ public class TowerBonusService : ITowerBonusService
         _authServiceUrl = configuration["Services:Auth"] ?? "http://localhost:5001";
     }
 
-    public async Task<TowerBonusSummaryDto> GetBonusesAsync(Guid userId, TowerType towerType)
+    public async Task<TowerBonusSummaryDto> GetBonusesAsync(Guid towerId)
     {
-        var key = (userId, towerType);
-
-        if (_bonusCache.TryGetValue(key, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+        if (_bonusCache.TryGetValue(towerId, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
         {
             return cached.Bonuses;
         }
 
         try
         {
-            var url = $"{_authServiceUrl}/internal/towers/{userId}/{(int)towerType}/bonuses";
+            var url = $"{_authServiceUrl}/internal/towers/{towerId}/bonuses";
             var response = await _httpClient.GetAsync(url);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to fetch bonuses for user {UserId}, tower {TowerType}: {Status}",
-                    userId, towerType, response.StatusCode);
+                _logger.LogWarning("Failed to fetch bonuses for tower {TowerId}: {Status}",
+                    towerId, response.StatusCode);
                 return CreateEmptyBonuses();
             }
 
@@ -60,71 +57,57 @@ public class TowerBonusService : ITowerBonusService
             if (bonuses == null)
                 return CreateEmptyBonuses();
 
-            _bonusCache[key] = new CachedBonus(bonuses, DateTime.UtcNow + CacheExpiry);
+            _bonusCache[towerId] = new CachedBonus(bonuses, DateTime.UtcNow + CacheExpiry);
             return bonuses;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching bonuses for user {UserId}, tower {TowerType}",
-                userId, towerType);
+            _logger.LogError(ex, "Error fetching bonuses for tower {TowerId}", towerId);
             return CreateEmptyBonuses();
         }
     }
 
-    public async Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid userId, TowerType towerType)
+    public async Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid towerId)
     {
-        var key = (userId, towerType);
-
-        if (_weaponCache.TryGetValue(key, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+        if (_weaponCache.TryGetValue(towerId, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
         {
             return cached.Weapon;
         }
 
         try
         {
-            var url = $"{_authServiceUrl}/internal/towers/{userId}/{(int)towerType}/equipment/weapon";
+            var url = $"{_authServiceUrl}/internal/towers/{towerId}/equipment/weapon";
             var response = await _httpClient.GetAsync(url);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                _weaponCache[key] = new CachedWeapon(null, DateTime.UtcNow + CacheExpiry);
+                _weaponCache[towerId] = new CachedWeapon(null, DateTime.UtcNow + CacheExpiry);
                 return null;
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to fetch weapon for user {UserId}, tower {TowerType}: {Status}",
-                    userId, towerType, response.StatusCode);
+                _logger.LogWarning("Failed to fetch weapon for tower {TowerId}: {Status}",
+                    towerId, response.StatusCode);
                 return null;
             }
 
             var weapon = await response.Content.ReadFromJsonAsync<WeaponAttackStyleDto>();
-            _weaponCache[key] = new CachedWeapon(weapon, DateTime.UtcNow + CacheExpiry);
+            _weaponCache[towerId] = new CachedWeapon(weapon, DateTime.UtcNow + CacheExpiry);
             return weapon;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching weapon for user {UserId}, tower {TowerType}",
-                userId, towerType);
+            _logger.LogError(ex, "Error fetching weapon for tower {TowerId}", towerId);
             return null;
         }
     }
 
-    public void InvalidateCache(Guid userId)
+    public void InvalidateCache(Guid towerId)
     {
-        var keysToRemove = _bonusCache.Keys.Where(k => k.Item1 == userId).ToList();
-        foreach (var key in keysToRemove)
-        {
-            _bonusCache.TryRemove(key, out _);
-        }
-
-        var weaponKeysToRemove = _weaponCache.Keys.Where(k => k.Item1 == userId).ToList();
-        foreach (var key in weaponKeysToRemove)
-        {
-            _weaponCache.TryRemove(key, out _);
-        }
-
-        _logger.LogDebug("Invalidated cache for user {UserId}", userId);
+        _bonusCache.TryRemove(towerId, out _);
+        _weaponCache.TryRemove(towerId, out _);
+        _logger.LogDebug("Invalidated cache for tower {TowerId}", towerId);
     }
 
     private static TowerBonusSummaryDto CreateEmptyBonuses() => new(
@@ -140,17 +123,17 @@ public class TowerBonusService : ITowerBonusService
 /// </summary>
 public class LocalTowerBonusService : ITowerBonusService
 {
-    public Task<TowerBonusSummaryDto> GetBonusesAsync(Guid userId, TowerType towerType)
+    public Task<TowerBonusSummaryDto> GetBonusesAsync(Guid towerId)
     {
         return Task.FromResult(new TowerBonusSummaryDto(
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new Dictionary<TowerBonusType, decimal>()
         ));
     }
 
-    public Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid userId, TowerType towerType)
+    public Task<WeaponAttackStyleDto?> GetWeaponAttackStyleAsync(Guid towerId)
     {
         return Task.FromResult<WeaponAttackStyleDto?>(null);
     }
 
-    public void InvalidateCache(Guid userId) { }
+    public void InvalidateCache(Guid towerId) { }
 }

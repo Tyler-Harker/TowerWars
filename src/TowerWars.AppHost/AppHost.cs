@@ -34,13 +34,15 @@ var worldManager = builder.AddProject<Projects.TowerWars_WorldManager>("world-ma
     .WithEnvironment("ConnectionStrings__Redis", "localhost:6379")
     .WaitFor(redis);
 
-// Zone Server - depends on redis and auth (for token validation)
+// Zone Server - depends on redis, auth, and postgres (for player data)
 // Note: ENet UDP server listens on port 7100 (configured via Server:Port)
 // UDP ports don't appear in Aspire dashboard - check logs to verify it's running
 var zoneServer = builder.AddProject<Projects.TowerWars_ZoneServer>("zone-server")
+    .WithReference(towerwarsDb)
     .WithEnvironment("ConnectionStrings__Redis", "localhost:6379")
     .WithEnvironment("Server__Port", "7100")
     .WithReference(auth)
+    .WaitFor(towerwarsDb)
     .WaitFor(redis);
 
 // Social - depends on redis and postgres
@@ -58,7 +60,7 @@ var persistence = builder.AddProject<Projects.TowerWars_Persistence>("persistenc
     .WaitFor(redis);
 
 // Godot Client - runs the game directly with debug mode for hot reload
-var godotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "godot-mono");
+var godotPath = Path.Combine("godot-mono");
 var clientProjectPath = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "TowerWars.Client"));
 
 var godotClient = builder.AddExecutable("godot-client", godotPath, clientProjectPath, "--debug")

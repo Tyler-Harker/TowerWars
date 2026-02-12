@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using TowerWars.Auth.Data;
 using TowerWars.Auth.Models;
@@ -10,13 +9,11 @@ namespace TowerWars.Auth.Services;
 public interface ITowerProgressionService
 {
     Task<List<PlayerTowerDto>> GetPlayerTowersAsync(Guid userId);
-    Task<PlayerTowerDetailDto?> GetTowerDetailAsync(Guid userId, byte towerType);
+    Task<PlayerTowerDetailDto?> GetTowerDetailAsync(Guid towerId);
     Task<AllocateSkillResponse> AllocateSkillPointAsync(Guid userId, AllocateSkillRequest request);
     Task<ResetSkillsResponse> ResetSkillsAsync(Guid userId, ResetSkillsRequest request);
-    Task<TowerUnlockResponse> UnlockTowerAsync(Guid userId, TowerUnlockRequest request);
-    Task<TowerBonusSummaryDto> GetTowerBonusesAsync(Guid userId, byte towerType);
-    Task AddTowerXpAsync(Guid userId, byte towerType, int xpAmount);
-    Task EnsureBasicTowerUnlockedAsync(Guid userId);
+    Task<TowerBonusSummaryDto> GetTowerBonusesAsync(Guid towerId);
+    Task AddTowerXpAsync(Guid towerId, int xpAmount);
 }
 
 public class TowerProgressionService : ITowerProgressionService
@@ -42,30 +39,24 @@ public class TowerProgressionService : ITowerProgressionService
 
             return new PlayerTowerDto(
                 t.Id,
-                (byte)t.TowerType,
-                t.TowerType.ToString(),
                 t.Experience,
                 t.Level,
-                totalSkillPoints - usedSkillPoints,
-                t.Unlocked,
-                t.UnlockedAt
+                totalSkillPoints - usedSkillPoints
             );
         }).ToList();
     }
 
-    public async Task<PlayerTowerDetailDto?> GetTowerDetailAsync(Guid userId, byte towerType)
+    public async Task<PlayerTowerDetailDto?> GetTowerDetailAsync(Guid towerId)
     {
         var tower = await _db.PlayerTowers
-            .Where(pt => pt.UserId == userId && pt.TowerType == (TowerType)towerType)
+            .Where(pt => pt.Id == towerId)
             .Include(pt => pt.AllocatedSkills)
                 .ThenInclude(s => s.SkillNode)
             .FirstOrDefaultAsync();
 
         if (tower == null) return null;
 
-        var skillNodes = await _db.TowerSkillNodes
-            .Where(sn => sn.TowerType == (TowerType)towerType)
-            .ToListAsync();
+        var skillNodes = await _db.TowerSkillNodes.ToListAsync();
 
         var totalSkillPoints = TowerProgressionConstants.GetTotalSkillPointsForLevel(tower.Level);
         var usedSkillPoints = tower.AllocatedSkills.Sum(s => s.RanksAllocated * s.SkillNode!.SkillPointsCost);
@@ -74,16 +65,12 @@ public class TowerProgressionService : ITowerProgressionService
 
         return new PlayerTowerDetailDto(
             tower.Id,
-            towerType,
-            tower.TowerType.ToString(),
             tower.Experience,
             requiredXp,
             tower.Level,
             TowerProgressionConstants.MaxLevel,
             totalSkillPoints - usedSkillPoints,
             totalSkillPoints,
-            tower.Unlocked,
-            tower.UnlockedAt,
             skillNodes.Select(ToSkillNodeDto).ToList(),
             tower.AllocatedSkills.Select(s => new AllocatedSkillDto(
                 s.SkillNodeId,
@@ -106,15 +93,9 @@ public class TowerProgressionService : ITowerProgressionService
         if (tower == null)
             return new AllocateSkillResponse(false, "Tower not found", 0, null);
 
-        if (!tower.Unlocked)
-            return new AllocateSkillResponse(false, "Tower is not unlocked", 0, null);
-
         var skillNode = await _db.TowerSkillNodes.FindAsync(request.SkillNodeId);
         if (skillNode == null)
             return new AllocateSkillResponse(false, "Skill node not found", 0, null);
-
-        if (skillNode.TowerType != tower.TowerType)
-            return new AllocateSkillResponse(false, "Skill node does not belong to this tower type", 0, null);
 
         if (tower.Level < skillNode.RequiredTowerLevel)
             return new AllocateSkillResponse(false, $"Tower level {skillNode.RequiredTowerLevel} required", 0, null);
@@ -200,61 +181,10 @@ public class TowerProgressionService : ITowerProgressionService
         return new ResetSkillsResponse(true, null, refundedPoints);
     }
 
-    public async Task<TowerUnlockResponse> UnlockTowerAsync(Guid userId, TowerUnlockRequest request)
-    {
-        var towerType = (TowerType)request.TowerType;
-
-        var existing = await _db.PlayerTowers
-            .FirstOrDefaultAsync(pt => pt.UserId == userId && pt.TowerType == towerType);
-
-        if (existing != null && existing.Unlocked)
-            return new TowerUnlockResponse(false, "Tower already unlocked", null);
-
-        if (existing != null)
-        {
-            existing.Unlocked = true;
-            existing.UnlockedAt = DateTime.UtcNow;
-            existing.UpdatedAt = DateTime.UtcNow;
-        }
-        else
-        {
-            existing = new PlayerTower
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                TowerType = towerType,
-                Experience = 0,
-                Level = 1,
-                Unlocked = true,
-                UnlockedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _db.PlayerTowers.Add(existing);
-        }
-
-        await _db.SaveChangesAsync();
-
-        return new TowerUnlockResponse(
-            true,
-            null,
-            new PlayerTowerDto(
-                existing.Id,
-                request.TowerType,
-                towerType.ToString(),
-                existing.Experience,
-                existing.Level,
-                TowerProgressionConstants.GetTotalSkillPointsForLevel(existing.Level),
-                existing.Unlocked,
-                existing.UnlockedAt
-            )
-        );
-    }
-
-    public async Task<TowerBonusSummaryDto> GetTowerBonusesAsync(Guid userId, byte towerType)
+    public async Task<TowerBonusSummaryDto> GetTowerBonusesAsync(Guid towerId)
     {
         var tower = await _db.PlayerTowers
-            .Where(pt => pt.UserId == userId && pt.TowerType == (TowerType)towerType)
+            .Where(pt => pt.Id == towerId)
             .Include(pt => pt.AllocatedSkills)
                 .ThenInclude(s => s.SkillNode)
             .FirstOrDefaultAsync();
@@ -265,12 +195,12 @@ public class TowerProgressionService : ITowerProgressionService
         return CalculateBonusSummary(tower.AllocatedSkills);
     }
 
-    public async Task AddTowerXpAsync(Guid userId, byte towerType, int xpAmount)
+    public async Task AddTowerXpAsync(Guid towerId, int xpAmount)
     {
         var tower = await _db.PlayerTowers
-            .FirstOrDefaultAsync(pt => pt.UserId == userId && pt.TowerType == (TowerType)towerType);
+            .FirstOrDefaultAsync(pt => pt.Id == towerId);
 
-        if (tower == null || !tower.Unlocked) return;
+        if (tower == null) return;
 
         tower.Experience += xpAmount;
         var newLevel = TowerProgressionConstants.GetLevelFromXp(tower.Experience);
@@ -282,37 +212,6 @@ public class TowerProgressionService : ITowerProgressionService
 
         tower.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
-    }
-
-    public async Task EnsureBasicTowerUnlockedAsync(Guid userId)
-    {
-        var basicTower = await _db.PlayerTowers
-            .FirstOrDefaultAsync(pt => pt.UserId == userId && pt.TowerType == TowerType.Basic);
-
-        if (basicTower == null)
-        {
-            basicTower = new PlayerTower
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                TowerType = TowerType.Basic,
-                Experience = 0,
-                Level = 1,
-                Unlocked = true,
-                UnlockedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _db.PlayerTowers.Add(basicTower);
-            await _db.SaveChangesAsync();
-        }
-        else if (!basicTower.Unlocked)
-        {
-            basicTower.Unlocked = true;
-            basicTower.UnlockedAt = DateTime.UtcNow;
-            basicTower.UpdatedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync();
-        }
     }
 
     private int GetSkillCost(Guid skillNodeId)

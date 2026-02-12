@@ -116,7 +116,8 @@ public class PacketSerializerTests
             RequestId = 123,
             TowerType = TowerType.Cannon,
             GridX = 5,
-            GridY = 10
+            GridY = 10,
+            PlayerTowerId = Guid.NewGuid()
         };
 
         var bytes = PacketSerializer.Serialize(original);

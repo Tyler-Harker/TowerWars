@@ -136,7 +136,7 @@ public sealed record PlayerDisconnectedEvent(
 public sealed record TowerXpGainedEvent(
     Guid MatchId,
     Guid PlayerId,
-    byte TowerType,
+    Guid TowerId,
     int XpAmount,
     string Source,  // "unit_kill", "wave_clear", "match_complete", "victory", "perfect_wave", "boss_kill"
     DateTime Timestamp

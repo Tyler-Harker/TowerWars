@@ -43,9 +43,12 @@ public partial class GameWorld : Node2D
         _network = GetNode<NetworkManager>("/root/GameManager/NetworkManager");
         _packetHandler = GetNode<PacketHandler>("/root/GameManager/PacketHandler");
 
+        // Entity events use C# events (not Godot signals) to avoid byte[] marshalling issues
         _packetHandler.EntitySpawned += OnEntitySpawnedWithData;
         _packetHandler.EntityDestroyed += OnEntityDestroyed;
         _packetHandler.EntityUpdated += OnEntityUpdated;
+
+        // These use Godot signals (primitive types only)
         _packetHandler.PlayerStateUpdated += OnPlayerStateUpdated;
         _packetHandler.WaveStarted += OnWaveStarted;
         _packetHandler.WaveEnded += OnWaveEnded;
@@ -68,7 +71,7 @@ public partial class GameWorld : Node2D
         }
     }
 
-    public void RequestBuildTower(TowerType type, Vector2 position)
+    public void RequestBuildTower(TowerType type, Vector2 position, Guid playerTowerId = default)
     {
         // Translate from client screen position to grid coordinates
         var localPos = position - _gridOffset;
@@ -82,7 +85,7 @@ public partial class GameWorld : Node2D
             return;
         }
 
-        _network?.SendTowerBuild(type, gridX, gridY);
+        _network?.SendTowerBuild(type, gridX, gridY, playerTowerId);
     }
 
     public void RequestSellTower(uint towerId)

@@ -109,15 +109,10 @@ public class AuthDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.UserId).HasColumnName("user_id");
-            entity.Property(e => e.TowerType).HasColumnName("tower_type").HasConversion<short>();
             entity.Property(e => e.Experience).HasColumnName("experience");
             entity.Property(e => e.Level).HasColumnName("level");
-            entity.Property(e => e.Unlocked).HasColumnName("unlocked");
-            entity.Property(e => e.UnlockedAt).HasColumnName("unlocked_at");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
-
-            entity.HasIndex(e => new { e.UserId, e.TowerType }).IsUnique();
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.PlayerTowers)
@@ -129,7 +124,6 @@ public class AuthDbContext : DbContext
             entity.ToTable("tower_skill_nodes");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
-            entity.Property(e => e.TowerType).HasColumnName("tower_type").HasConversion<short>();
             entity.Property(e => e.NodeId).HasColumnName("node_id").HasMaxLength(32);
             entity.Property(e => e.Tier).HasColumnName("tier");
             entity.Property(e => e.PositionX).HasColumnName("position_x");
@@ -144,7 +138,7 @@ public class AuthDbContext : DbContext
             entity.Property(e => e.MaxRanks).HasColumnName("max_ranks");
             entity.Property(e => e.PrerequisiteNodeIds).HasColumnName("prerequisite_node_ids");
 
-            entity.HasIndex(e => new { e.TowerType, e.NodeId }).IsUnique();
+            entity.HasIndex(e => e.NodeId).IsUnique();
         });
 
         modelBuilder.Entity<PlayerTowerSkill>(entity =>

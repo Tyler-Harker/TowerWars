@@ -20,20 +20,17 @@ public sealed class AuthService : IAuthService
     private readonly AuthDbContext _db;
     private readonly IJwtService _jwt;
     private readonly ISessionCacheService _sessionCache;
-    private readonly ITowerProgressionService _towerProgressionService;
     private readonly JwtSettings _jwtSettings;
 
     public AuthService(
         AuthDbContext db,
         IJwtService jwt,
         ISessionCacheService sessionCache,
-        ITowerProgressionService towerProgressionService,
         JwtSettings jwtSettings)
     {
         _db = db;
         _jwt = jwt;
         _sessionCache = sessionCache;
-        _towerProgressionService = towerProgressionService;
         _jwtSettings = jwtSettings;
     }
 
@@ -76,9 +73,6 @@ public sealed class AuthService : IAuthService
         _db.Users.Add(user);
         _db.PlayerStats.Add(stats);
         await _db.SaveChangesAsync();
-
-        // Unlock the basic tower for new users
-        await _towerProgressionService.EnsureBasicTowerUnlockedAsync(user.Id);
 
         return await CreateSessionAsync(user, ipAddress);
     }

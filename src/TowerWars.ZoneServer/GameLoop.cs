@@ -13,8 +13,8 @@ public sealed class GameLoop : BackgroundService
     private readonly ILogger<GameLoop> _logger;
     private readonly Lazy<ENetServer> _serverLazy;
     private ENetServer _server => _serverLazy.Value;
-    private readonly GameSession _gameSession;
-    private readonly PlayerManager _playerManager;
+    private readonly GameSessionManager _sessionManager;
+    private readonly ConnectionManager _connectionManager;
     private readonly ushort _port;
 
     private const double TickInterval = 1.0 / GameConstants.DefaultTickRate;
@@ -22,21 +22,21 @@ public sealed class GameLoop : BackgroundService
     public GameLoop(
         ILogger<GameLoop> logger,
         Lazy<ENetServer> server,
-        GameSession gameSession,
-        PlayerManager playerManager,
+        GameSessionManager sessionManager,
+        ConnectionManager connectionManager,
         IConfiguration configuration)
     {
         _logger = logger;
         _serverLazy = server;
-        _gameSession = gameSession;
-        _playerManager = playerManager;
+        _sessionManager = sessionManager;
+        _connectionManager = connectionManager;
         _port = ushort.Parse(configuration["Server:Port"] ?? "7100");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Wire up events now that all dependencies are resolved
-        _playerManager.EnsureEventsWired();
+        _connectionManager.EnsureEventsWired();
         _server.Start(_port);
         _logger.LogInformation("Game loop started at {TickRate} ticks/sec", GameConstants.DefaultTickRate);
 
@@ -56,8 +56,11 @@ public sealed class GameLoop : BackgroundService
 
             while (accumulator >= TickInterval)
             {
-                _gameSession.Update((float)TickInterval);
-                _gameSession.Tick();
+                foreach (var session in _sessionManager.GetAllSessions())
+                {
+                    session.Update((float)TickInterval);
+                    session.Tick();
+                }
                 accumulator -= TickInterval;
             }
 

@@ -91,7 +91,6 @@ public sealed record EquippedItemDto(
 
 public sealed record TowerEquipmentDto(
     Guid PlayerTowerId,
-    byte TowerType,
     List<EquippedItemDto> Equipment,
     TowerBonusSummaryDto EquipmentBonuses
 );

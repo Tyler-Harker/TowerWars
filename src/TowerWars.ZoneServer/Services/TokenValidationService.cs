@@ -48,7 +48,12 @@ public sealed class LocalTokenValidationService : ITokenValidationService
 {
     public Task<(Guid UserId, Guid CharacterId)?> ValidateAsync(string token)
     {
-        return Task.FromResult<(Guid UserId, Guid CharacterId)?>(
-            (Guid.NewGuid(), Guid.NewGuid()));
+        // Use a deterministic UserId based on the token so the same token
+        // always maps to the same player in the database
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(token));
+        var userId = new Guid(hash.AsSpan(0, 16));
+        var characterId = new Guid(hash.AsSpan(16, 16));
+        return Task.FromResult<(Guid UserId, Guid CharacterId)?>((userId, characterId));
     }
 }

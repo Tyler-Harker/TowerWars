@@ -80,6 +80,21 @@ public class ENetServer : IDisposable
         }
     }
 
+    public void SendBytes(uint peerId, byte[] data, PacketFlags flags = PacketFlags.Reliable)
+    {
+        lock (_peersLock)
+        {
+            if (!_peers.TryGetValue(peerId, out var connectedPeer))
+                return;
+
+            var enetPacket = default(Packet);
+            enetPacket.Create(data, flags);
+
+            byte channel = flags.HasFlag(PacketFlags.Reliable) ? (byte)0 : (byte)1;
+            connectedPeer.Peer.Send(channel, ref enetPacket);
+        }
+    }
+
     public void Broadcast<T>(T packet, PacketFlags flags = PacketFlags.Reliable) where T : IPacket
     {
         var data = PacketSerializer.Serialize(packet);

@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using TowerWars.Shared.Protocol;
 using TowerWars.ZoneServer.Game;
-using TowerWars.ZoneServer.Networking;
 using TowerWars.ZoneServer.Services;
 using Xunit;
 
@@ -11,29 +10,13 @@ namespace TowerWars.ZoneServer.Tests.Game;
 
 public class GameSessionTests
 {
-    private readonly Mock<ILogger<GameSession>> _loggerMock;
-    private readonly Mock<ENetServer> _serverMock;
-    private readonly Mock<PlayerManager> _playerManagerMock;
+    private readonly Mock<ILogger> _loggerMock;
     private readonly Mock<IEventPublisher> _eventPublisherMock;
     private readonly Mock<ITowerBonusService> _towerBonusServiceMock;
 
     public GameSessionTests()
     {
-        _loggerMock = new Mock<ILogger<GameSession>>();
-        _serverMock = new Mock<ENetServer>(
-            new Mock<ILogger<ENetServer>>().Object,
-            new Mock<PacketRouter>(
-                new Mock<ILogger<PacketRouter>>().Object,
-                null!,
-                null!
-            ).Object
-        );
-        _playerManagerMock = new Mock<PlayerManager>(
-            new Mock<ILogger<PlayerManager>>().Object,
-            _serverMock.Object,
-            new Mock<ITokenValidationService>().Object,
-            new Mock<IEventPublisher>().Object
-        );
+        _loggerMock = new Mock<ILogger>();
         _eventPublisherMock = new Mock<IEventPublisher>();
         _towerBonusServiceMock = new Mock<ITowerBonusService>();
     }
@@ -65,12 +48,18 @@ public class GameSessionTests
 
     private GameSession CreateGameSession()
     {
+        Action<uint, IPacket> send = (_, _) => { };
+        Action<IPacket> broadcast = _ => { };
+        var playerManager = new SessionPlayerManager(send, broadcast, _loggerMock.Object);
+
         return new GameSession(
+            Guid.NewGuid(),
             _loggerMock.Object,
-            new Lazy<ENetServer>(() => _serverMock.Object),
-            _playerManagerMock.Object,
+            playerManager,
             _eventPublisherMock.Object,
-            _towerBonusServiceMock.Object
+            _towerBonusServiceMock.Object,
+            send,
+            broadcast
         );
     }
 }
